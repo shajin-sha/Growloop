@@ -116,6 +116,25 @@ export function createExperimentsRouter(service: ExperimentService) {
     }
   });
 
+  router.post("/goals/:id/resolve", async (request, response, next) => {
+    try {
+      const input = request.body as { experiments: Array<{ id: string; action: string }> };
+      if (!Array.isArray(input.experiments)) {
+        response.status(400).json({ error: "experiments array is required" });
+        return;
+      }
+      const result = await service.resolveGoal(request.params.id, {
+        experiments: input.experiments.map((e) => ({
+          id: e.id,
+          action: e.action as "keep" | "stop" | "kill"
+        }))
+      });
+      response.json({ result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/experiments", async (_request, response, next) => {
     try {
       response.json({ experiments: await service.list() });

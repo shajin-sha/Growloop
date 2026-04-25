@@ -18,6 +18,7 @@ import type {
   WinnerResult
 } from "../types/experiment.types";
 import type { WinnerDetectionService } from "./winner-detection.service";
+import type { GoalResolutionInput, GoalResolutionResult } from "@growloop/shared";
 
 export class ExperimentService {
   constructor(
@@ -131,6 +132,13 @@ export class ExperimentService {
             pullRequest.number,
             pullRequest.url
           );
+        }
+        // Store the commit SHA for this experiment
+        const commitEntry = result.experimentCommits.find((c) => c.experimentId === experiment.id);
+        if (commitEntry) {
+          for (const variant of experiment.variants) {
+            await this.repository.attachCommitSha(variant.id, commitEntry.commitSha);
+          }
         }
         updateGenerationStatus(goal.id, experiment.id, "done", "PR opened");
       }
@@ -263,6 +271,100 @@ export class ExperimentService {
     }
 
     return this.withMetrics(id);
+  }
+
+  async resolveGoal(goalId: string, input: GoalResolutionInput): Promise<GoalResolutionResult> {
+    const goal = await this.getGoalOrThrow(goalId);
+
+    // Find the shared branch from any experiment variant that has a PR
+    const branchName = goal.experiments
+      .flatMap((e) => e.variants)
+      .find((v) => v.branchName)?.branchName;
+
+    if (!branchName) {
+      throw new Error("No branch found for this goal — generation may not have completed yet");
+    }
+
+    // Build the resolution list with commit SHAs
+    const experiments = input.experiments.map((item) => {
+      const experiment = goal.experiments.find((e) => e.id === item.id);
+      if (!experiment) throw new Error(`Experiment ${item.id} not found in goal`);
+
+      const commitSha = experiment.variants.find((v) => v.commitSha)?.commitSha;
+      if (!commitSha && item.action === "keep") {
+        throw new Error(`No commit SHA found for experiment ${experiment.name} — cannot keep without a commit`);
+      }
+
+      return {
+        experimentId: experiment.id,
+        name: experiment.name,
+        commitSha: commitSha ?? "",
+        action: item.action
+      };
+    });
+
+    const keepCount = experiments.filter((e) => e.action === "keep").length;
+    if (keepCount === 0) {
+      // Nothing to keep — just update statuses and close PRs
+      for (const item of input.experiments) {
+        await this.repository.updateStatus(item.id, item.action === "kill" ? "killed" : "paused");
+      }
+      await this.repository.updateGoalStatus(goalId, "completed");
+      return { goalId, status: "done", message: "All experiments stopped. No PR created." };
+    }
+
+    // Fire-and-forget the Codex resolution
+    this.runGoalResolution(goal, branchName, experiments).catch((error) => {
+      logger.error("Goal resolution failed", {
+        module: "experiment-service",
+        goalId,
+        error: error instanceof Error ? error.message : "unknown error"
+      });
+    });
+
+    // Update statuses immediately
+    for (const item of input.experiments) {
+      if (item.action === "keep") {
+        await this.repository.updateStatus(item.id, "completed");
+      } else if (item.action === "kill") {
+        await this.repository.updateStatus(item.id, "killed");
+      } else {
+        await this.repository.updateStatus(item.id, "paused");
+      }
+    }
+
+    return { goalId, status: "running", message: "Codex is building the resolution PR…" };
+  }
+
+  private async runGoalResolution(
+    goal: GoalSummary,
+    branchName: string,
+    experiments: Array<{ experimentId: string; name: string; commitSha: string; action: "keep" | "stop" | "kill" }>
+  ): Promise<void> {
+    const result = await this.generator.resolveGoal({
+      goalId: goal.id,
+      repoFullName: goal.repoFullName,
+      branchName,
+      goal: goal.title,
+      experiments
+    });
+
+    const pullRequest = await this.pullRequests.createPullRequest({
+      repoFullName: goal.repoFullName,
+      title: result.pullRequestTitle,
+      body: result.pullRequestBody,
+      headBranch: result.branchName,
+      baseBranch: "main"
+    });
+
+    logger.info("Created resolution PR for goal", {
+      module: "experiment-service",
+      goalId: goal.id,
+      prNumber: pullRequest.number,
+      prUrl: pullRequest.url
+    });
+
+    await this.repository.updateGoalStatus(goal.id, "completed");
   }
 
   async getPullRequestStatuses(id: string): Promise<PullRequestStatus[]> {

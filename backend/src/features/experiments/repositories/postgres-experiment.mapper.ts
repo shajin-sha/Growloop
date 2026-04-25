@@ -33,6 +33,7 @@ type VariantRow = {
   branch_name: string | null;
   pull_request_number: number | null;
   pull_request_url: string | null;
+  commit_sha: string | null;
   created_at: Date;
 };
 
@@ -75,6 +76,7 @@ export function mapVariant(row: VariantRow): ExperimentVariant {
     branchName: row.branch_name,
     pullRequestNumber: row.pull_request_number,
     pullRequestUrl: row.pull_request_url,
+    commitSha: row.commit_sha,
     createdAt: row.created_at.toISOString()
   };
 }

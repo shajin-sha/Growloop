@@ -345,4 +345,11 @@ export class PostgresExperimentRepository implements ExperimentRepository {
       [variantId, branchName, pullRequestNumber, pullRequestUrl]
     );
   }
+
+  async attachCommitSha(variantId: string, commitSha: string): Promise<void> {
+    await this.db.query(
+      `update experiment_variants set commit_sha = $2 where id = $1`,
+      [variantId, commitSha]
+    );
+  }
 }

@@ -4,7 +4,7 @@ export type CreateGoalFormValues = {
   title: string;
 };
 
-export type ExperimentAction = "running" | "paused" | "killed";
+export type ExperimentAction = "running" | "paused" | "killed" | "completed";
 export type GoalAction = Extract<GoalStatus, "running" | "paused" | "killed">;
 
 export type ExperimentViewModel = ExperimentSummary & {

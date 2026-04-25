@@ -1,4 +1,4 @@
-import { ArrowUpRight, BarChart3, ChevronDown, GitPullRequest, Loader2, Pause, Play, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Loader2, Pause, Play, Square, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -6,38 +6,25 @@ import { cn } from "@/lib/utils";
 import type { GenerationStepStatus } from "../api/experimentsApi";
 import type { ExperimentAction, ExperimentViewModel } from "../types/experiment.types";
 
+export type ExperimentResolutionAction = "keep" | "stop" | "kill";
+
 type ExperimentRowProps = {
   experiment: ExperimentViewModel;
   generationStatus?: GenerationStepStatus | null;
-  goalTitle?: string;
-  onEvaluate?: (id: string) => Promise<void>;
-  onGenerate?: (id: string, goal: string) => Promise<void>;
+  rank?: "best" | "worst" | null;
   onStatus?: (id: string, status: ExperimentAction) => Promise<void>;
+  // Selection mode — when set, buttons become selections instead of immediate API calls
+  selection?: ExperimentResolutionAction | null;
+  onSelect?: (id: string, action: ExperimentResolutionAction | null) => void;
 };
 
 function formatRate(rate: number) {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
-function getPerformanceTone(uplift: number) {
-  if (uplift > 0) {
-    return {
-      metricPanel: "border-emerald-100 bg-emerald-50/45",
-      metricText: "text-emerald-700"
-    };
-  }
-
-  if (uplift < 0) {
-    return {
-      metricPanel: "border-red-100 bg-red-50/45",
-      metricText: "text-red-700"
-    };
-  }
-
-  return {
-    metricPanel: "border-border bg-muted/50",
-    metricText: "text-foreground"
-  };
+function formatNumber(n: number) {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return n.toString();
 }
 
 const planningSteps = [
@@ -50,142 +37,139 @@ const planningSteps = [
 export function ExperimentRow({
   experiment,
   generationStatus,
-  goalTitle,
-  onEvaluate,
-  onGenerate,
-  onStatus
+  rank,
+  onStatus,
+  selection,
+  onSelect
 }: ExperimentRowProps) {
   if (experiment.isPending) {
     return <PendingExperimentCard experimentName={experiment.name} />;
   }
 
-  const bestMetric = experiment.metrics.reduce(
-    (best, metric) => (metric.conversionRate > best.conversionRate ? metric : best),
-    { conversionRate: 0, conversions: 0, variantId: "", visitors: 0 }
-  );
-  const bestVariant = experiment.variants.find((variant) => variant.id === bestMetric.variantId);
-  const pullRequestUrl = experiment.variants.find((variant) => variant.pullRequestUrl)?.pullRequestUrl;
-  const createdDate = new Intl.DateTimeFormat("en", {
-    day: "2-digit",
-    month: "short"
-  }).format(new Date(experiment.createdAt));
-  const totalVisitors = experiment.metrics.reduce((total, metric) => total + metric.visitors, 0);
-  const totalConversions = experiment.metrics.reduce((total, metric) => total + metric.conversions, 0);
-  const bestRate = formatRate(bestMetric.conversionRate);
-  const controlMetric = experiment.metrics[0];
-  const baselineRate = controlMetric?.conversionRate ?? 0;
-  const baselineRateLabel = formatRate(baselineRate);
-  const uplift =
-    baselineRate > 0
-      ? Math.round(((bestMetric.conversionRate - baselineRate) / baselineRate) * 100)
-      : 0;
-  const expectedConversionsAtBaseline = Math.round(bestMetric.visitors * baselineRate);
-  const addedConversions = Math.max(bestMetric.conversions - expectedConversionsAtBaseline, 0);
-  const performanceTone = getPerformanceTone(uplift);
+  const pullRequestUrl = experiment.variants.find((v) => v.pullRequestUrl)?.pullRequestUrl;
+  const totalVisitors = experiment.metrics.reduce((t, m) => t + m.visitors, 0);
+  const totalConversions = experiment.metrics.reduce((t, m) => t + m.conversions, 0);
+  const conversionRate = totalVisitors > 0 ? totalConversions / totalVisitors : 0;
+  const hasData = totalVisitors > 0;
+  const createdDate = new Intl.DateTimeFormat("en", { day: "2-digit", month: "short" }).format(new Date(experiment.createdAt));
   const canManage = ["draft", "running", "paused"].includes(experiment.status);
-  const primaryAction = experiment.status === "running" ? "paused" : "running";
-  const primaryActionLabel = experiment.status === "running" ? "Pause" : "Run";
-  const PrimaryActionIcon = experiment.status === "running" ? Pause : Play;
+  const isWinner = rank === "best";
+  const primaryAction = isWinner ? "completed" : experiment.status === "running" ? "paused" : "running";
+  const primaryActionLabel = isWinner ? "Keep" : experiment.status === "running" ? "Stop" : "Run";
+  const PrimaryActionIcon = isWinner ? Check : experiment.status === "running" ? Pause : Play;
   const runStateLabel = experiment.status.charAt(0).toUpperCase() + experiment.status.slice(1);
+  const isGenerating = (generationStatus && generationStatus.step !== "done") || (!pullRequestUrl && !generationStatus);
+  const isFailed = generationStatus?.step === "failed";
+
+  // Selection mode: buttons select an action instead of calling API immediately
+  const isSelectionMode = Boolean(onSelect);
+  const defaultSelectionAction: ExperimentResolutionAction = isWinner ? "keep" : "stop";
 
   const updateStatus = (status: ExperimentAction) => {
     if (!onStatus) return;
     void onStatus(experiment.id, status);
   };
 
-  const generatePullRequest = () => {
-    if (!onGenerate) return;
-    void onGenerate(experiment.id, `${goalTitle ?? experiment.name}: ${experiment.name}`);
+  const handlePrimaryClick = () => {
+    if (isSelectionMode && onSelect) {
+      const newAction = defaultSelectionAction;
+      // Toggle off if already selected with same action
+      onSelect(experiment.id, selection === newAction ? null : newAction);
+    } else {
+      updateStatus(primaryAction);
+    }
   };
 
-  const evaluateExperiment = () => {
-    if (!onEvaluate) return;
-    void onEvaluate(experiment.id);
+  const handleKill = () => {
+    if (isSelectionMode && onSelect) {
+      onSelect(experiment.id, selection === "kill" ? null : "kill");
+    } else {
+      updateStatus("killed");
+    }
   };
+
+  // Selection badge colors
+  const selectionStyle = selection === "keep"
+    ? "border-emerald-400 ring-2 ring-emerald-200"
+    : selection === "stop"
+      ? "border-amber-400 ring-2 ring-amber-200"
+      : selection === "kill"
+        ? "border-red-400 ring-2 ring-red-200"
+        : "";
 
   return (
-    <article className="group cursor-pointer rounded-[12px] border border-border bg-background p-3">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="min-w-0 flex-1 line-clamp-2 text-base font-medium leading-snug">{experiment.name}</h2>
+    <article className={cn(
+      "rounded-xl border bg-background p-4 transition-all",
+      rank === "best" ? "border-emerald-200 bg-emerald-50/30" : rank === "worst" ? "border-red-200 bg-red-50/30" : "border-border",
+      selectionStyle
+    )}>
+      <div className="flex items-start justify-between gap-2">
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug">{experiment.name}</h2>
         {canManage ? (
           <ExperimentActionSplitButton
+            isSelectionMode={isSelectionMode}
             menuLabel={`More actions for ${experiment.name}`}
-            onEvaluate={evaluateExperiment}
-            onGenerate={generatePullRequest}
-            onKill={() => updateStatus("killed")}
-            onPause={() => updateStatus("paused")}
-            onPrimaryAction={() => updateStatus(primaryAction)}
-            onRun={() => updateStatus("running")}
-            primaryIcon={<PrimaryActionIcon size={13} />}
-            primaryLabel={primaryActionLabel}
+            onKill={handleKill}
+            onPrimaryAction={handlePrimaryClick}
+            primaryIcon={isSelectionMode
+              ? (selection === "keep" ? <Check size={13} /> : selection === "stop" ? <Square size={13} /> : selection === "kill" ? <X size={13} /> : <PrimaryActionIcon size={13} />)
+              : <PrimaryActionIcon size={13} />}
+            primaryLabel={isSelectionMode
+              ? (selection === "keep" ? "Keep ✓" : selection === "stop" ? "Stop ✓" : selection === "kill" ? "Kill ✓" : primaryActionLabel)
+              : primaryActionLabel}
+            selection={selection}
             statusLabel={runStateLabel}
           />
         ) : null}
       </div>
-      <p className="mt-0.5 line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">
+
+      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
         {experiment.description ?? "Codex-generated patch"}
       </p>
 
-      {generationStatus && generationStatus.step !== "done" ? (
-        <div className={cn(
-          "mt-2 flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs",
-          generationStatus.step === "failed"
-            ? "border border-red-200 bg-red-50 text-red-700"
-            : "border border-amber-200 bg-amber-50 text-amber-800"
-        )}>
-          {generationStatus.step !== "failed" ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : null}
-          <span className="truncate">{generationStatus.message}</span>
+      {/* Generation status */}
+      {isGenerating && !isFailed ? (
+        <div className="mt-3 flex items-center gap-2 text-xs text-blue-600">
+          <Loader2 size={12} className="animate-spin" />
+          <span>{generationStatus?.message ?? "Codex is generating code changes…"}</span>
         </div>
+      ) : isFailed ? (
+        <p className="mt-3 text-xs text-red-600">{generationStatus?.message ?? "Generation failed"}</p>
       ) : null}
 
-      <div className={cn(
-        "mt-4 grid grid-cols-[1fr_auto] items-end gap-3 rounded-md border px-3 py-2.5",
-        performanceTone.metricPanel
-      )}>
-        <div>
-          <p className="text-[11px] text-muted-foreground">Lift</p>
-          <p className={cn("mt-0.5 font-mono text-2xl tabular-nums", performanceTone.metricText)}>
-            {uplift > 0 ? `+${uplift}%` : `${uplift}%`}
-          </p>
+      {/* Metrics */}
+      {hasData ? (
+        <div className="mt-4">
+          <p className="font-mono text-3xl tabular-nums tracking-tight">{formatRate(conversionRate)}</p>
+          <div className="mt-2 flex items-baseline gap-4 text-xs text-muted-foreground">
+            <span>{formatNumber(totalVisitors)} visitors</span>
+            <span>{formatNumber(totalConversions)} conversions</span>
+          </div>
         </div>
-        <div className="text-right">
-          <p className="font-mono text-lg tabular-nums">{bestRate}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">vs {baselineRateLabel}</p>
-        </div>
-      </div>
+      ) : (
+        <p className="mt-4 text-xs leading-relaxed text-muted-foreground/70">
+          Waiting for traffic. Drive visitors to your site to start collecting data.
+        </p>
+      )}
 
-      <div className="mt-3 grid grid-cols-3 gap-2 border-y border-border py-2">
-        <div>
-          <p className="font-mono text-xs tabular-nums">{totalVisitors}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Visitors</p>
-        </div>
-        <div>
-          <p className="font-mono text-xs tabular-nums">+{addedConversions}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Added</p>
-        </div>
-        <div>
-          <p className="truncate text-xs">{bestVariant?.name ?? "Learning"}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Leader</p>
-        </div>
-      </div>
-
-      <div className="mt-2.5 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-mono text-[11px] text-muted-foreground">
-            {createdDate} / {totalConversions} tracked
-          </p>
+      {/* Footer */}
+      <div className="mt-4 flex items-center justify-between text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <span>{createdDate} · {runStateLabel}</span>
+          {rank === "best" ? (
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Winner</span>
+          ) : rank === "worst" ? (
+            <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-600">Lowest</span>
+          ) : null}
         </div>
         {pullRequestUrl ? (
           <a
-            className="inline-flex shrink-0 items-center gap-1 text-xs font-medium underline-offset-4 hover:underline"
+            className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
             href={pullRequestUrl}
             rel="noreferrer"
             target="_blank"
           >
-            PR
-            <ArrowUpRight size={12} />
+            PR <ArrowUpRight size={11} />
           </a>
         ) : null}
       </div>
@@ -200,194 +184,105 @@ function PendingExperimentCard({ experimentName }: { experimentName: string }) {
     const interval = window.setInterval(() => {
       setStepIndex((current) => (current + 1) % planningSteps.length);
     }, 900);
-
     return () => window.clearInterval(interval);
   }, []);
 
   return (
-    <article className="overflow-hidden rounded-[12px] border border-border bg-background p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-base font-medium leading-snug text-muted-foreground">{experimentName}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{planningSteps[stepIndex]}</p>
-        </div>
-        <div className="h-8 w-20 animate-pulse rounded-full bg-muted" />
+    <article className="rounded-xl border border-border bg-background p-4">
+      <h2 className="text-sm font-semibold text-muted-foreground">{experimentName}</h2>
+      <p className="mt-1 text-xs text-muted-foreground">{planningSteps[stepIndex]}</p>
+      <div className="mt-4 h-8 w-24 animate-pulse rounded bg-muted" />
+      <div className="mt-3 flex gap-4">
+        <div className="h-4 w-16 animate-pulse rounded bg-muted" />
+        <div className="h-4 w-20 animate-pulse rounded bg-muted" />
       </div>
-
-      <div className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-3">
-        <div className="h-3 w-24 animate-pulse rounded-full bg-muted-foreground/15" />
-        <div className="mt-3 h-7 w-20 animate-pulse rounded-full bg-muted-foreground/20" />
-        <div className="mt-2 h-3 w-32 animate-pulse rounded-full bg-muted-foreground/15" />
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2 border-y border-border py-3">
-        <div className="h-8 animate-pulse rounded-md bg-muted" />
-        <div className="h-8 animate-pulse rounded-md bg-muted" />
-        <div className="h-8 animate-pulse rounded-md bg-muted" />
-      </div>
-
-      <div className="mt-3 h-3 w-32 animate-pulse rounded-full bg-muted" />
     </article>
   );
 }
 
 type ExperimentActionSplitButtonProps = {
+  isSelectionMode: boolean;
   menuLabel: string;
-  onEvaluate: () => void;
-  onGenerate: () => void;
   onKill: () => void;
-  onPause: () => void;
   onPrimaryAction: () => void;
-  onRun: () => void;
   primaryIcon: ReactNode;
   primaryLabel: string;
+  selection?: ExperimentResolutionAction | null;
   statusLabel: string;
 };
 
 function ExperimentActionSplitButton({
+  isSelectionMode,
   menuLabel,
-  onEvaluate,
-  onGenerate,
   onKill,
-  onPause,
   onPrimaryAction,
-  onRun,
   primaryIcon,
   primaryLabel,
+  selection,
   statusLabel
 }: ExperimentActionSplitButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const buttonRef = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isOpen) {
-      return undefined;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (buttonRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      setIsOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    if (!isOpen) return undefined;
+    const close = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setIsOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setIsOpen(false); };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", esc); };
   }, [isOpen]);
 
-  const handleMenuAction = (action: () => void) => {
-    action();
-    setIsOpen(false);
-  };
+  const act = (fn: () => void) => { fn(); setIsOpen(false); };
+
+  const primarySelected = selection === "keep" || selection === "stop";
+  const killSelected = selection === "kill";
+
+  const menuItems: { icon: ReactNode; label: string; onClick: () => void; active?: boolean }[] = [
+    {
+      icon: <X size={12} />,
+      label: isSelectionMode ? (killSelected ? "Kill ✓" : "Kill") : "Kill",
+      onClick: () => act(onKill),
+      active: killSelected
+    }
+  ];
 
   return (
-    <div
-      className="relative ml-auto inline-flex shrink-0 items-stretch rounded-md border border-border bg-background shadow-sm"
-      ref={buttonRef}
-    >
+    <div className="relative ml-auto inline-flex shrink-0 items-stretch rounded-md border border-border bg-background text-xs" ref={ref}>
       <button
-        className="inline-flex h-8 items-center gap-1.5 rounded-l-md px-2.5 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
-        onClick={(event) => {
-          event.stopPropagation();
-          onPrimaryAction();
-          setIsOpen(false);
-        }}
+        className={cn(
+          "inline-flex h-7 items-center gap-1 px-2 font-medium hover:bg-muted",
+          primarySelected && "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+        )}
+        onClick={(e) => { e.stopPropagation(); onPrimaryAction(); setIsOpen(false); }}
         type="button"
       >
-        {primaryIcon}
-        {primaryLabel}
+        {primaryIcon}{primaryLabel}
       </button>
-      <button
-        aria-expanded={isOpen}
-        aria-label={menuLabel}
-        className="flex h-8 w-8 items-center justify-center rounded-r-md border-l border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
-        onClick={(event) => {
-          event.stopPropagation();
-          setIsOpen((current) => !current);
-        }}
-        type="button"
-      >
-        <ChevronDown size={14} />
+      <button aria-expanded={isOpen} aria-label={menuLabel} className="flex h-7 w-7 items-center justify-center border-l border-border text-muted-foreground hover:bg-muted hover:text-foreground" onClick={(e) => { e.stopPropagation(); setIsOpen((c) => !c); }} type="button">
+        <ChevronDown size={13} />
       </button>
       {isOpen ? (
-        <div className="absolute right-0 top-9 z-10 grid w-52 overflow-hidden rounded-md border border-border bg-background p-1 shadow-lg">
-          <SplitButtonMenuItem
-            description="Create the agent PR"
-            icon={<GitPullRequest size={13} />}
-            onClick={() => handleMenuAction(onGenerate)}
-            title="Generate PR"
-          />
-          <SplitButtonMenuItem
-            description="Check current winner"
-            icon={<BarChart3 size={13} />}
-            onClick={() => handleMenuAction(onEvaluate)}
-            title="Evaluate"
-          />
-          <SplitButtonMenuItem
-            description="Resume traffic allocation"
-            icon={<Play size={13} />}
-            onClick={() => handleMenuAction(onRun)}
-            title="Continue"
-          />
-          <SplitButtonMenuItem
-            description="Stop assigning new traffic"
-            icon={<Pause size={13} />}
-            onClick={() => handleMenuAction(onPause)}
-            title="Pause"
-          />
-          <SplitButtonMenuItem
-            description="End this experiment"
-            icon={<X size={13} />}
-            onClick={() => handleMenuAction(onKill)}
-            title="Kill"
-          />
-          <div className="border-t border-border px-2 py-1.5 font-mono text-[10px] uppercase text-muted-foreground">
-            {statusLabel}
-          </div>
+        <div className="absolute right-0 top-8 z-10 grid w-48 rounded-md border border-border bg-background p-1 shadow-lg">
+          {menuItems.map((item) => (
+            <MenuItem active={item.active} icon={item.icon} key={item.label} label={item.label} onClick={item.onClick} />
+          ))}
+          <div className="border-t border-border px-2 py-1 font-mono text-[10px] uppercase text-muted-foreground">{statusLabel}</div>
         </div>
       ) : null}
     </div>
   );
 }
 
-type SplitButtonMenuItemProps = {
-  description: string;
-  icon: ReactNode;
-  onClick: () => void;
-  title: string;
-};
-
-function SplitButtonMenuItem({
-  description,
-  icon,
-  onClick,
-  title
-}: SplitButtonMenuItemProps) {
+function MenuItem({ icon, label, onClick, active }: { icon: ReactNode; label: string; onClick: () => void; active?: boolean }) {
   return (
     <button
-      className="grid grid-cols-[auto_1fr] gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
+      className={cn("flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted", active && "bg-red-50 text-red-700 hover:bg-red-100")}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
       type="button"
     >
-      <span className="mt-0.5 text-muted-foreground">{icon}</span>
-      <span>
-        <span className="block text-xs font-medium">{title}</span>
-        <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{description}</span>
-      </span>
+      <span className="text-muted-foreground">{icon}</span>
+      {label}
     </button>
   );
 }

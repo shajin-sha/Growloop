@@ -6,6 +6,7 @@ import {
   evaluateExperiment,
   generateExperiment,
   listGoals,
+  resolveGoal,
   updateGoalStatus,
   updateExperimentStatus
 } from "../api/experimentsApi";
@@ -84,6 +85,11 @@ export function useExperiments() {
     replaceExperiment(setGoals, experiment);
   };
 
+  const resolve = async (goalId: string, experiments: Array<{ id: string; action: "keep" | "stop" | "kill" }>) => {
+    await resolveGoal(goalId, experiments);
+    await refresh();
+  };
+
   return {
     goals,
     isLoading,
@@ -94,6 +100,7 @@ export function useExperiments() {
     updateStatus,
     evaluate,
     generate,
+    resolve,
     refresh
   };
 }

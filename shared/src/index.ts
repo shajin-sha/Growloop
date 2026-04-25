@@ -13,6 +13,7 @@ export type ExperimentVariant = {
   branchName: string | null;
   pullRequestNumber: number | null;
   pullRequestUrl: string | null;
+  commitSha: string | null;
   createdAt: string;
 };
 
@@ -99,4 +100,19 @@ export type TrackEventPayload = {
   eventName: string;
   url?: string;
   metadata?: Record<string, unknown>;
+};
+
+export type GoalResolutionAction = "keep" | "stop" | "kill";
+
+export type GoalResolutionInput = {
+  experiments: Array<{
+    id: string;
+    action: GoalResolutionAction;
+  }>;
+};
+
+export type GoalResolutionResult = {
+  goalId: string;
+  status: "pending" | "running" | "done" | "failed";
+  message: string;
 };

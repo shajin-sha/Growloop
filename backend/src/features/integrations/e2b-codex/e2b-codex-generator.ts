@@ -51,12 +51,33 @@ export type GenerateGoalResult = {
   branchName: string;
   pullRequestTitle: string;
   pullRequestBody: string;
+  experimentCommits: Array<{ experimentId: string; commitSha: string }>;
+};
+
+export type ResolveGoalInput = {
+  goalId: string;
+  repoFullName: string;
+  branchName: string;
+  goal: string;
+  experiments: Array<{
+    experimentId: string;
+    name: string;
+    commitSha: string;
+    action: "keep" | "stop" | "kill";
+  }>;
+};
+
+export type ResolveGoalResult = {
+  branchName: string;
+  pullRequestTitle: string;
+  pullRequestBody: string;
 };
 
 export interface VariantGenerator {
   planGoalExperiments(input: PlanGoalExperimentsInput): Promise<GeneratedExperimentPlan[]>;
   generate(input: GenerateVariantsInput): Promise<GeneratedVariant[]>;
   generateForGoal(input: GenerateGoalInput): Promise<GenerateGoalResult>;
+  resolveGoal(input: ResolveGoalInput): Promise<ResolveGoalResult>;
 }
 
 const REPO_PATH = "/home/user/repo";
@@ -115,6 +136,9 @@ const CODEX_EXPERIMENT_SYSTEM_PROMPT = [
   "  - Do not render or expose all experiments to the same visitor.",
   "",
   "## Rules",
+  "  - Do NOT change the overall look, feel, or theme of the website. Respect the existing design system, colors, fonts, spacing, and visual style.",
+  "  - Match the existing CSS/styling patterns. If the site uses Tailwind, use Tailwind classes. If it uses CSS modules, use CSS modules. Do not introduce a different styling approach.",
+  "  - Keep changes minimal and visually consistent with the rest of the site.",
   "  - Do not create external accounts, credentials, migrations, or background jobs unless the repo already has a clear local pattern.",
   "  - Do not commit, push, open pull requests, or talk to anyone. Growloop handles GitHub after you finish.",
   "  - Use the goal as the source of truth. Do not invent unrelated product strategy."
@@ -233,6 +257,8 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
 
       await sandbox.git.createBranch(REPO_PATH, branchName);
 
+      const experimentCommits: Array<{ experimentId: string; commitSha: string }> = [];
+
       // Run Codex for each experiment sequentially on the same branch
       for (const experiment of input.experiments) {
         const prompt = [
@@ -266,11 +292,22 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
             authorEmail: "growloopbot[bot]@users.noreply.github.com"
           });
 
+          // Capture the commit SHA for this experiment
+          const shaResult = await sandbox.commands.run(
+            `git -C ${REPO_PATH} rev-parse HEAD`,
+            { timeoutMs: 10_000 }
+          );
+          const commitSha = shaResult.stdout.trim();
+          if (commitSha) {
+            experimentCommits.push({ experimentId: experiment.experimentId, commitSha });
+          }
+
           logger.info("Codex completed experiment", {
             module: "e2b-codex",
             goalId: input.goalId,
             experimentId: experiment.experimentId,
-            experimentName: experiment.name
+            experimentName: experiment.name,
+            commitSha
           });
         } catch (error) {
           logger.error("Codex failed for experiment, continuing with others", {
@@ -321,6 +358,138 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
           `Allowed paths: ${input.allowList.join(", ") || "not configured"}`,
           "",
           "Each experiment was implemented by Codex in an E2B sandbox."
+        ].join("\n"),
+        experimentCommits
+      };
+    } finally {
+      await sandbox.kill().catch(() => { });
+    }
+  }
+
+  async resolveGoal(input: ResolveGoalInput): Promise<ResolveGoalResult> {
+    if (!env.E2B_API_KEY) throw new Error("E2B_API_KEY is required");
+    if (!getCodexApiKey()) throw new Error("OPENAI_API_KEY or CODEX_API_KEY is required");
+
+    const token = await this.github.createInstallationToken();
+    const suffix = randomUUID().slice(0, 8);
+    const resolvedBranch = `growloop/resolved-${input.goalId.slice(0, 8)}/${suffix}`;
+
+    const keepExperiments = input.experiments.filter((e) => e.action === "keep");
+    const stopExperiments = input.experiments.filter((e) => e.action !== "keep");
+
+    const sandbox = await Sandbox.create(env.E2B_TEMPLATE, {
+      apiKey: env.E2B_API_KEY,
+      timeoutMs: env.E2B_SANDBOX_TIMEOUT_MS,
+      envs: { ...getCodexEnvironment() }
+    });
+
+    logger.info("Created E2B sandbox for goal resolution", {
+      module: "e2b-codex",
+      goalId: input.goalId,
+      repoFullName: input.repoFullName,
+      resolvedBranch,
+      keepCount: keepExperiments.length,
+      stopCount: stopExperiments.length,
+      sandboxId: sandbox.sandboxId
+    });
+
+    try {
+      // Clone from the existing experiment branch so we have all commits
+      await sandbox.git.clone(`https://github.com/${input.repoFullName}.git`, {
+        path: REPO_PATH,
+        branch: input.branchName,
+        username: GITHUB_USERNAME,
+        password: token,
+        timeoutMs: 120_000
+      });
+
+      // Create a fresh resolution branch from main
+      await sandbox.commands.run(
+        `git -C ${REPO_PATH} fetch origin main && git -C ${REPO_PATH} checkout -b ${resolvedBranch} origin/main`,
+        { timeoutMs: 60_000 }
+      );
+
+      // Cherry-pick only the "keep" commits in order
+      for (const experiment of keepExperiments) {
+        try {
+          await sandbox.commands.run(
+            `git -C ${REPO_PATH} cherry-pick ${experiment.commitSha}`,
+            { timeoutMs: 60_000 }
+          );
+          logger.info("Cherry-picked experiment commit", {
+            module: "e2b-codex",
+            goalId: input.goalId,
+            experimentId: experiment.experimentId,
+            commitSha: experiment.commitSha
+          });
+        } catch (error) {
+          // If cherry-pick conflicts, abort and let Codex resolve
+          await sandbox.commands.run(
+            `git -C ${REPO_PATH} cherry-pick --abort`,
+            { timeoutMs: 10_000 }
+          ).catch(() => { });
+
+          logger.warn("Cherry-pick conflict, using Codex to re-apply", {
+            module: "e2b-codex",
+            goalId: input.goalId,
+            experimentId: experiment.experimentId,
+            error: getErrorMessage(error)
+          });
+
+          // Ask Codex to re-apply this experiment's changes cleanly
+          const prompt = [
+            "SYSTEM PROMPT FOR CODEX AGENT",
+            CODEX_EXPERIMENT_SYSTEM_PROMPT,
+            "",
+            "RESOLUTION TASK",
+            `Goal: ${input.goal}`,
+            `Goal ID: ${input.goalId}`,
+            `Experiment to keep: ${experiment.name}`,
+            `Original commit: ${experiment.commitSha}`,
+            "",
+            "The cherry-pick of this experiment's commit had conflicts.",
+            "Please re-apply the changes from this experiment cleanly on top of the current branch state.",
+            "Look at the original commit diff and apply the same logical changes without conflicts.",
+            "IMPORTANT: Only apply changes for THIS experiment. Do not add unrelated changes."
+          ].join("\n");
+
+          await sandbox.commands.run(
+            `${env.CODEX_COMMAND} exec --full-auto --skip-git-repo-check -C ${REPO_PATH} ${shellQuote(prompt)}`,
+            { envs: getCodexEnvironment(), timeoutMs: 300_000 }
+          );
+
+          await sandbox.git.add(REPO_PATH, { all: true });
+          await sandbox.git.commit(REPO_PATH, `experiment (resolved): ${experiment.name}`, {
+            authorName: "growloopbot[bot]",
+            authorEmail: "growloopbot[bot]@users.noreply.github.com"
+          });
+        }
+      }
+
+      await sandbox.git.push(REPO_PATH, {
+        remote: "origin",
+        branch: resolvedBranch,
+        username: GITHUB_USERNAME,
+        password: token,
+        timeoutMs: 120_000
+      });
+
+      const keptList = keepExperiments.map((e) => `- ✅ **${e.name}** (kept)`).join("\n");
+      const stoppedList = stopExperiments.map((e) => `- ❌ **${e.name}** (${e.action})`).join("\n");
+
+      return {
+        branchName: resolvedBranch,
+        pullRequestTitle: `[Growloop] Resolved: ${input.goal}`,
+        pullRequestBody: [
+          "Goal resolution generated by Growloop.",
+          "",
+          `**Goal:** ${input.goal}`,
+          "",
+          "**Experiments:**",
+          keptList,
+          stoppedList,
+          "",
+          "Only the kept experiments are included in this PR."
         ].join("\n")
       };
     } finally {

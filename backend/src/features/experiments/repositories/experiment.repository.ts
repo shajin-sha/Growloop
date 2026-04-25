@@ -35,4 +35,5 @@ export interface ExperimentRepository {
     pullRequestNumber: number,
     pullRequestUrl: string
   ): Promise<void>;
+  attachCommitSha(variantId: string, commitSha: string): Promise<void>;
 }

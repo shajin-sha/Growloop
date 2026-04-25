@@ -157,6 +157,14 @@ export async function evaluateExperiment(id: string) {
   });
 }
 
+export async function resolveGoal(goalId: string, experiments: Array<{ id: string; action: "keep" | "stop" | "kill" }>) {
+  const body = await request<{ result: { goalId: string; status: string; message: string } }>(`/api/goals/${goalId}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ experiments })
+  });
+  return body.result;
+}
+
 export async function generateExperiment(id: string, goal: string) {
   const body = await request<ExperimentResponse>(`/api/experiments/${id}/generate`, {
     method: "POST",

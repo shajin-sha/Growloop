@@ -5,26 +5,35 @@ import { Button } from "@/components/ui/button";
 
 import { CreateExperimentForm } from "./CreateExperimentForm";
 import { ExperimentRow } from "./ExperimentRow";
+import type { ExperimentResolutionAction } from "./ExperimentRow";
+import { GoalResolutionBar } from "./GoalResolutionBar";
 import { useExperiments } from "../hooks/useExperiments";
 import { useGenerationStatus } from "../hooks/useGenerationStatus";
 import { useGitHubApp } from "../hooks/useGitHubApp";
+
+type GoalSelections = Record<string, ExperimentResolutionAction>; // experimentId → action
 
 export function ExperimentsPage() {
   const {
     create,
     error,
-    evaluate,
-    generate,
     goals,
     isLoading,
     refresh,
     removeGoal,
+    resolve,
     updateStatus
   } = useExperiments();
   const githubApp = useGitHubApp();
   const { getExperimentStatus } = useGenerationStatus(goals.map((g) => g.id));
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const menuRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Per-goal selection state: goalId → { experimentId → action }
+  const [goalSelections, setGoalSelections] = useState<Record<string, GoalSelections>>({});
+  // Which goal's bar is active (the one with any selection)
+  const [activeGoalId, setActiveGoalId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -40,6 +49,50 @@ export function ExperimentsPage() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [openMenuId]);
 
+  const handleSelect = (goalId: string, experimentId: string, action: ExperimentResolutionAction | null) => {
+    setGoalSelections((prev) => {
+      const current = { ...prev[goalId] };
+      if (action === null) {
+        delete current[experimentId];
+      } else {
+        current[experimentId] = action;
+      }
+      const updated = { ...prev, [goalId]: current };
+      // Set active goal if there are any selections
+      const hasSelections = Object.keys(current).length > 0;
+      setActiveGoalId(hasSelections ? goalId : null);
+      return updated;
+    });
+  };
+
+  const handleConfirm = async (goalId: string) => {
+    const goal = goals.find((g) => g.id === goalId);
+    if (!goal) return;
+
+    const selections = goalSelections[goalId] ?? {};
+    // Build the full list — unselected experiments default to "stop"
+    const experiments = goal.experiments
+      .filter((e) => ["draft", "running", "paused"].includes(e.status))
+      .map((e) => ({
+        id: e.id,
+        action: (selections[e.id] ?? "stop") as ExperimentResolutionAction
+      }));
+
+    setIsSubmitting(true);
+    try {
+      await resolve(goalId, experiments);
+      setGoalSelections((prev) => { const next = { ...prev }; delete next[goalId]; return next; });
+      setActiveGoalId(null);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCancel = (goalId: string) => {
+    setGoalSelections((prev) => { const next = { ...prev }; delete next[goalId]; return next; });
+    setActiveGoalId(null);
+  };
+
   const experiments = goals.flatMap((goal) => goal.experiments);
   const runningExperiments = experiments.filter((e) => e.status === "running").length;
   const totalPullRequests = experiments.reduce(
@@ -48,20 +101,18 @@ export function ExperimentsPage() {
   );
   const winners = experiments.filter((e) => e.winnerVariantId).length;
   const stats = [
-    { icon: Beaker, label: "Goals", value: goals.length.toString() },
-    { icon: Activity, label: "Running", value: runningExperiments.toString() },
-    { icon: GitPullRequest, label: "Pull requests", value: totalPullRequests.toString() },
-    { icon: Trophy, label: "Winners", value: winners.toString() }
+    { icon: Beaker, label: "Goals", value: goals.length.toString(), bg: "bg-violet-50", text: "text-violet-600" },
+    { icon: Activity, label: "Running variations", value: runningExperiments.toString(), bg: "bg-emerald-50", text: "text-emerald-600" },
+    { icon: GitPullRequest, label: "Pull requests", value: totalPullRequests.toString(), bg: "bg-sky-50", text: "text-sky-600" },
+    { icon: Trophy, label: "Winners", value: winners.toString(), bg: "bg-amber-50", text: "text-amber-600" }
   ];
 
   return (
-    <main className="min-h-screen bg-muted/40">
+    <main className="min-h-screen bg-background">
       <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-3">
           <div className="flex items-center gap-3">
-            <div className="grid size-8 place-items-center rounded-md border border-border bg-foreground text-background">
-              <Activity size={17} />
-            </div>
+            <img alt="Growloop" className="size-8 rounded-md" src="/growloop.png" />
             <div>
               <h1 className="text-base font-medium leading-tight">Growloop</h1>
               <p className="text-xs text-muted-foreground">Goal-led conversion operations</p>
@@ -88,9 +139,6 @@ export function ExperimentsPage() {
         <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
           <div className="flex min-h-36 flex-col justify-between rounded-lg border border-border bg-background p-5">
             <div className="max-w-2xl">
-              <p className="font-mono text-[11px] uppercase tracking-normal text-muted-foreground">
-                Autonomous conversion OS
-              </p>
               <h2 className="mt-2 text-2xl font-medium leading-tight tracking-tight">
                 Goals drive every experiment
               </h2>
@@ -99,25 +147,17 @@ export function ExperimentsPage() {
                 the SDK, and keep the patch that converts.
               </p>
             </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <span className="rounded-full border border-border px-3 py-1 font-mono text-xs text-muted-foreground">
-                {runningExperiments} running
-              </span>
-              <span className="rounded-full border border-border px-3 py-1 font-mono text-xs text-muted-foreground">
-                {experiments.length} experiments
-              </span>
-            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             {stats.map((stat) => {
               const Icon = stat.icon;
               return (
-                <div className="rounded-lg border border-border bg-background p-4" key={stat.label}>
-                  <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                <div className={`rounded-lg ${stat.bg} p-4`} key={stat.label}>
+                  <div className={`flex items-center justify-between gap-3 ${stat.text}`}>
                     <span className="text-xs">{stat.label}</span>
                     <Icon size={15} />
                   </div>
-                  <p className="mt-3 font-mono text-2xl tabular-nums">{stat.value}</p>
+                  <p className="mt-3 font-mono text-2xl tabular-nums text-foreground">{stat.value}</p>
                 </div>
               );
             })}
@@ -178,23 +218,62 @@ export function ExperimentsPage() {
                   </div>
                 </div>
                 <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-4">
-                  {goal.experiments.map((experiment) => (
-                    <ExperimentRow
-                      experiment={experiment}
-                      generationStatus={getExperimentStatus(goal.id, experiment.id)}
-                      goalTitle={goal.title}
-                      key={experiment.id}
-                      onEvaluate={evaluate}
-                      onGenerate={generate}
-                      onStatus={updateStatus}
-                    />
-                  ))}
+                  {(() => {
+                    const rates = goal.experiments.map((e) => {
+                      const v = e.metrics.reduce((t, m) => t + m.visitors, 0);
+                      const c = e.metrics.reduce((t, m) => t + m.conversions, 0);
+                      return { id: e.id, rate: v > 0 ? c / v : -1 };
+                    });
+                    const withData = rates.filter((r) => r.rate >= 0);
+                    const bestId = withData.length >= 2 ? withData.reduce((a, b) => (b.rate > a.rate ? b : a)).id : null;
+                    const worstId = withData.length >= 2 ? withData.reduce((a, b) => (b.rate < a.rate ? b : a)).id : null;
+
+                    return goal.experiments.map((experiment) => {
+                      let rank: "best" | "worst" | null = null;
+                      if (experiment.id === bestId) rank = "best";
+                      else if (experiment.id === worstId && bestId !== worstId) rank = "worst";
+
+                      return (
+                        <ExperimentRow
+                          experiment={experiment}
+                          generationStatus={getExperimentStatus(goal.id, experiment.id)}
+                          key={experiment.id}
+                          onSelect={(id, action) => handleSelect(goal.id, id, action)}
+                          onStatus={updateStatus}
+                          rank={rank}
+                          selection={goalSelections[goal.id]?.[experiment.id] ?? null}
+                        />
+                      );
+                    });
+                  })()}
                 </div>
               </section>
             ))}
           </section>
         ) : null}
       </section>
+
+      {activeGoalId ? (() => {
+        const goal = goals.find((g) => g.id === activeGoalId);
+        if (!goal) return null;
+        const selections = goalSelections[activeGoalId] ?? {};
+        const selectionEntries = Object.entries(selections).map(([id, action]) => ({
+          id,
+          name: goal.experiments.find((e) => e.id === id)?.name ?? id,
+          action
+        }));
+        const manageable = goal.experiments.filter((e) => ["draft", "running", "paused"].includes(e.status));
+        return (
+          <GoalResolutionBar
+            goalTitle={goal.title}
+            isSubmitting={isSubmitting}
+            onCancel={() => handleCancel(activeGoalId)}
+            onConfirm={() => void handleConfirm(activeGoalId)}
+            selections={selectionEntries}
+            totalExperiments={manageable.length}
+          />
+        );
+      })() : null}
     </main>
   );
 }

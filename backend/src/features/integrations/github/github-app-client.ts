@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { App } from "@octokit/app";
 
 import { env } from "../../../config/env";
@@ -126,16 +128,28 @@ export class GitHubAppClient implements PullRequestClient {
   }
 
   private async createInstallationClient() {
-    if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY || !env.GITHUB_APP_INSTALLATION_ID) {
+    if (!env.GITHUB_APP_ID || !env.GITHUB_APP_INSTALLATION_ID) {
       throw new Error("GitHub App environment variables are not configured");
     }
 
     const app = new App({
       appId: env.GITHUB_APP_ID,
-      privateKey: env.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n")
+      privateKey: await this.getPrivateKey()
     });
 
     return app.getInstallationOctokit(Number(env.GITHUB_APP_INSTALLATION_ID));
+  }
+
+  private async getPrivateKey() {
+    if (env.GITHUB_APP_PRIVATE_KEY_PATH) {
+      return readFile(env.GITHUB_APP_PRIVATE_KEY_PATH, "utf8");
+    }
+
+    if (env.GITHUB_APP_PRIVATE_KEY) {
+      return env.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n");
+    }
+
+    throw new Error("GitHub App private key is not configured");
   }
 
   private splitRepo(repoFullName: string) {

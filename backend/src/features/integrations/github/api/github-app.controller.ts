@@ -13,7 +13,11 @@ export function createGitHubAppRouter() {
 
     response.json({
       app: {
-        configured: Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_INSTALLATION_ID),
+        configured: Boolean(
+          env.GITHUB_APP_ID &&
+            env.GITHUB_APP_INSTALLATION_ID &&
+            (env.GITHUB_APP_PRIVATE_KEY || env.GITHUB_APP_PRIVATE_KEY_PATH)
+        ),
         installUrl,
         slug: env.GITHUB_APP_SLUG ?? null
       }

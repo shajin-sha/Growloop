@@ -24,6 +24,7 @@ const envSchema = z.object({
   E2B_TEMPLATE: z.string().default("codex"),
   E2B_SANDBOX_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
   OPENAI_API_KEY: z.string().optional(),
+  CODEX_API_KEY: z.string().optional(),
   CODEX_COMMAND: z.string().default("codex")
 });
 

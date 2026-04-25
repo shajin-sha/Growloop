@@ -67,7 +67,7 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
         "",
         `Goal: ${input.goal}`,
         `Allowed paths: ${input.allowList.join(", ") || "not configured"}`,
-        env.OPENAI_API_KEY
+        getCodexApiKey()
           ? "Implementation was generated in an E2B Codex sandbox."
           : "Sandbox smoke mode: Codex API key is not configured yet."
       ].join("\n")
@@ -83,7 +83,7 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
       apiKey: env.E2B_API_KEY,
       timeoutMs: env.E2B_SANDBOX_TIMEOUT_MS,
       envs: {
-        ...(env.OPENAI_API_KEY ? { OPENAI_API_KEY: env.OPENAI_API_KEY } : {})
+        ...getCodexEnvironment()
       }
     });
 
@@ -107,7 +107,7 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
 
       await sandbox.git.createBranch(REPO_PATH, plan.branchName);
 
-      if (env.OPENAI_API_KEY) {
+      if (getCodexApiKey()) {
         await this.runCodex(sandbox, input, plan);
       } else {
         await this.writeSmokeChange(sandbox, input, plan);
@@ -166,9 +166,26 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
       "Do not commit, push, or open a pull request."
     ].join("\n");
 
-    await sandbox.commands.run(`${env.CODEX_COMMAND} exec --full-auto --skip-git-repo-check -C ${REPO_PATH} ${shellQuote(prompt)}`, {
-      timeoutMs: 300_000
-    });
+    try {
+      await sandbox.commands.run(
+        `${env.CODEX_COMMAND} exec --full-auto --skip-git-repo-check -C ${REPO_PATH} ${shellQuote(prompt)}`,
+        {
+          envs: getCodexEnvironment(),
+          timeoutMs: 300_000
+        }
+      );
+    } catch (error) {
+      logger.error("Codex command failed in E2B sandbox", {
+        module: "e2b-codex",
+        experimentId: input.experimentId,
+        branchName: plan.branchName,
+        error: getErrorMessage(error),
+        stdout: getCommandOutput(error, "stdout"),
+        stderr: getCommandOutput(error, "stderr")
+      });
+
+      throw error;
+    }
   }
 
   private async writeSmokeChange(
@@ -206,6 +223,32 @@ function shellQuote(value: string) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function getCodexApiKey() {
+  return env.CODEX_API_KEY ?? env.OPENAI_API_KEY ?? null;
+}
+
+function getCodexEnvironment(): Record<string, string> {
+  const apiKey = getCodexApiKey();
+
+  if (!apiKey) {
+    return {};
+  }
+
+  return {
+    CODEX_API_KEY: apiKey,
+    OPENAI_API_KEY: apiKey
+  };
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "unknown error";
+}
+
+function getCommandOutput(error: unknown, key: "stdout" | "stderr") {
+  if (typeof error !== "object" || error === null || !(key in error)) {
+    return null;
+  }
+
+  const output = (error as Record<typeof key, unknown>)[key];
+  return typeof output === "string" ? output.slice(0, 4_000) : null;
 }

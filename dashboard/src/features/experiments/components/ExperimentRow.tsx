@@ -1,4 +1,14 @@
-import { GitBranch, GitPullRequest, Pause, Play, RotateCcw, Sparkles, Trophy, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  GitBranch,
+  Pause,
+  Play,
+  RotateCcw,
+  Sparkles,
+  Target,
+  Trophy,
+  X
+} from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -15,13 +25,28 @@ type ExperimentRowProps = {
   onStatus(id: string, status: ExperimentAction): Promise<void>;
 };
 
+function humanizeEvent(value: string) {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function formatGoal(conversionEvent: string) {
+  const eventName = humanizeEvent(conversionEvent);
+
+  return eventName ? `Higher ${eventName} rate` : "Higher conversion rate";
+}
+
 export function ExperimentRow({
   experiment,
   onEvaluate,
   onGenerate,
   onStatus
 }: ExperimentRowProps) {
-  const [goal, setGoal] = useState(`Improve ${experiment.conversionEvent} conversion`);
+  const defaultGoal = formatGoal(experiment.conversionEvent);
+  const [goal, setGoal] = useState(defaultGoal);
   const metricsByVariant = new Map(experiment.metrics.map((metric) => [metric.variantId, metric]));
   const bestMetric = experiment.metrics.reduce(
     (best, metric) => (metric.conversionRate > best.conversionRate ? metric : best),
@@ -33,97 +58,75 @@ export function ExperimentRow({
     day: "2-digit",
     month: "short"
   }).format(new Date(experiment.createdAt));
+  const totalVisitors = experiment.metrics.reduce((total, metric) => total + metric.visitors, 0);
+  const totalConversions = experiment.metrics.reduce((total, metric) => total + metric.conversions, 0);
+  const bestRate = Math.round(bestMetric.conversionRate * 1000) / 10;
 
   return (
-    <article className="grid gap-5 border-b border-border bg-background p-5 transition hover:bg-muted/40 last:border-b-0 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.9fr)_minmax(320px,0.7fr)]">
-      <div className="space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-base font-medium">{experiment.name}</h2>
-              <ExperimentStatusBadge status={experiment.status} />
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-muted-foreground">
-              <span>{experiment.repoFullName}</span>
-              <span>{experiment.conversionEvent}</span>
-              <span>{createdDate}</span>
-            </div>
+    <article className="group flex min-h-[420px] flex-col rounded-lg border border-border bg-background p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <ExperimentStatusBadge status={experiment.status} />
+            <span className="font-mono text-xs text-muted-foreground">{createdDate}</span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              aria-label="Start experiment"
-              onClick={() => onStatus(experiment.id, "running")}
-              size="icon"
-              variant="outline"
-            >
-              <Play size={16} />
-            </Button>
-            <Button
-              aria-label="Pause experiment"
-              onClick={() => onStatus(experiment.id, "paused")}
-              size="icon"
-              variant="outline"
-            >
-              <Pause size={16} />
-            </Button>
-            <Button
-              aria-label="Kill experiment"
-              onClick={() => onStatus(experiment.id, "killed")}
-              size="icon"
-              variant="destructive"
-            >
-              <X size={16} />
-            </Button>
-          </div>
+          <h2 className="mt-4 line-clamp-2 text-xl font-medium leading-snug">{experiment.name}</h2>
+          <p className="mt-2 truncate font-mono text-xs text-muted-foreground">{experiment.repoFullName}</p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {experiment.variants.map((variant) => (
-            <div
-              className={cn(
-                "rounded-md border border-border bg-muted/30 p-3",
-                variant.id === experiment.winnerVariantId && "border-emerald-300 bg-emerald-50"
-              )}
-              key={variant.id}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <span className="truncate text-sm font-medium">{variant.name}</span>
-                <span className="font-mono text-xs text-muted-foreground">{variant.weight}%</span>
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-3 text-xs">
-                <span className="inline-flex min-w-0 items-center gap-1 text-muted-foreground">
-                  <GitBranch size={12} />
-                  <span className="truncate">{variant.branchName ?? "no branch"}</span>
-                </span>
-                {variant.pullRequestUrl ? (
-                  <a
-                    className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline"
-                    href={variant.pullRequestUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <GitPullRequest size={12} />
-                    PR
-                  </a>
-                ) : null}
-              </div>
-            </div>
-          ))}
+        <div className="flex shrink-0 gap-1">
+          <Button
+            aria-label="Start experiment"
+            onClick={() => onStatus(experiment.id, "running")}
+            size="icon"
+            variant="ghost"
+          >
+            <Play size={16} />
+          </Button>
+          <Button
+            aria-label="Pause experiment"
+            onClick={() => onStatus(experiment.id, "paused")}
+            size="icon"
+            variant="ghost"
+          >
+            <Pause size={16} />
+          </Button>
+          <Button
+            aria-label="Kill experiment"
+            onClick={() => onStatus(experiment.id, "killed")}
+            size="icon"
+            variant="ghost"
+          >
+            <X size={16} />
+          </Button>
         </div>
       </div>
 
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-md border border-border bg-background p-3">
-            <p className="text-xs text-muted-foreground">Best rate</p>
-            <p className="mt-1 font-mono text-xl tabular-nums">
-              {Math.round(bestMetric.conversionRate * 1000) / 10}%
-            </p>
-          </div>
-          <div className="rounded-md border border-border bg-background p-3">
-            <p className="text-xs text-muted-foreground">Pull requests</p>
-            <p className="mt-1 font-mono text-xl tabular-nums">{openPullRequests}</p>
-          </div>
+      <div className="mt-5 rounded-md border border-border bg-muted/40 p-4">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Target size={15} />
+          <span className="truncate">{defaultGoal}</span>
         </div>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Patching variants for {humanizeEvent(experiment.conversionEvent) || "conversion"} and comparing the cleanest winner.
+        </p>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="rounded-md border border-border bg-background p-3">
+          <p className="text-xs text-muted-foreground">Best</p>
+          <p className="mt-1 font-mono text-lg tabular-nums">{bestRate}%</p>
+        </div>
+        <div className="rounded-md border border-border bg-background p-3">
+          <p className="text-xs text-muted-foreground">Visitors</p>
+          <p className="mt-1 font-mono text-lg tabular-nums">{totalVisitors}</p>
+        </div>
+        <div className="rounded-md border border-border bg-background p-3">
+          <p className="text-xs text-muted-foreground">PRs</p>
+          <p className="mt-1 font-mono text-lg tabular-nums">{openPullRequests}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
         {experiment.variants.map((variant) => {
           const metric = metricsByVariant.get(variant.id) ?? {
             variantId: variant.id,
@@ -132,22 +135,52 @@ export function ExperimentRow({
             conversionRate: 0
           };
 
-          return <MetricBar key={variant.id} metric={metric} variant={variant} />;
+          return <MetricBar compact key={variant.id} metric={metric} variant={variant} />;
         })}
       </div>
 
-      <div className="space-y-3">
-        <div className="rounded-md border border-border bg-muted/30 p-3">
+      <div className="mt-4 grid gap-2">
+        {experiment.variants.map((variant) => (
+          <div
+            className={cn(
+              "flex items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2",
+              variant.id === experiment.winnerVariantId && "border-emerald-300 bg-emerald-50"
+            )}
+            key={variant.id}
+          >
+            <span className="inline-flex min-w-0 items-center gap-2 text-sm">
+              <GitBranch className="shrink-0 text-muted-foreground" size={13} />
+              <span className="truncate">{variant.name}</span>
+            </span>
+            {variant.pullRequestUrl ? (
+              <a
+                className="inline-flex shrink-0 items-center gap-1 font-mono text-xs text-foreground underline-offset-4 hover:underline"
+                href={variant.pullRequestUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                PR
+                <ArrowUpRight size={12} />
+              </a>
+            ) : (
+              <span className="font-mono text-xs text-muted-foreground">{variant.weight}%</span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-auto pt-5">
+        <div className="mb-3 rounded-md border border-border bg-background p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Trophy size={15} />
-            <span className="truncate">{bestVariant?.name ?? "No winner yet"}</span>
+            <span className="truncate">{bestVariant?.name ?? "Waiting for signal"}</span>
           </div>
           <p className="mt-1 font-mono text-xs text-muted-foreground">
-            {bestMetric.visitors} visitors tracked
+            {totalConversions} conversions tracked
           </p>
         </div>
         <label className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Generation goal</span>
+          <span className="text-xs font-medium text-muted-foreground">Patch goal</span>
           <input
             className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-primary"
             onChange={(event) => setGoal(event.target.value)}
@@ -157,7 +190,7 @@ export function ExperimentRow({
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => onGenerate(experiment.id, goal)} variant="secondary">
             <Sparkles size={16} />
-            Generate
+            Patch
           </Button>
           <Button onClick={() => onEvaluate(experiment.id)} variant="outline">
             <RotateCcw size={16} />

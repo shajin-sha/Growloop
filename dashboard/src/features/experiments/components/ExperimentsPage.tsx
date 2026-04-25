@@ -2,14 +2,12 @@ import { Activity, Beaker, Github, GitPullRequest, RefreshCcw, Trophy } from "lu
 
 import { Button } from "@/components/ui/button";
 
-import { CreateExperimentForm } from "./CreateExperimentForm";
 import { ExperimentRow } from "./ExperimentRow";
 import { useExperiments } from "../hooks/useExperiments";
 import { useGitHubApp } from "../hooks/useGitHubApp";
 
 export function ExperimentsPage() {
   const {
-    create,
     error,
     evaluate,
     experiments,
@@ -122,37 +120,35 @@ export function ExperimentsPage() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-            <div>
-              <h2 className="text-base font-medium">Experiment queue</h2>
-              <p className="text-sm text-muted-foreground">Create, generate, evaluate, and control rollout state.</p>
-            </div>
-            <span className="font-mono text-xs text-muted-foreground">{experiments.length} records</span>
+        {error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-sm text-destructive">{error}</div>
+        ) : null}
+
+        {isLoading ? (
+          <div className="rounded-lg border border-border bg-background p-8 text-sm text-muted-foreground">
+            Loading experiments...
           </div>
-          <CreateExperimentForm onCreate={create} />
-          {error ? (
-            <div className="border-b border-border bg-red-50 p-5 text-sm text-destructive">{error}</div>
-          ) : null}
+        ) : null}
 
-          {isLoading ? (
-            <div className="p-8 text-sm text-muted-foreground">Loading experiments...</div>
-          ) : null}
+        {!isLoading && experiments.length === 0 ? (
+          <div className="rounded-lg border border-border bg-background p-8 text-sm text-muted-foreground">
+            No experiments yet.
+          </div>
+        ) : null}
 
-          {!isLoading && experiments.length === 0 ? (
-            <div className="p-8 text-sm text-muted-foreground">No experiments yet.</div>
-          ) : null}
-
-          {experiments.map((experiment) => (
-            <ExperimentRow
-              experiment={experiment}
-              key={experiment.id}
-              onEvaluate={evaluate}
-              onGenerate={generate}
-              onStatus={updateStatus}
-            />
-          ))}
-        </div>
+        {!isLoading && experiments.length > 0 ? (
+          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+            {experiments.map((experiment) => (
+              <ExperimentRow
+                experiment={experiment}
+                key={experiment.id}
+                onEvaluate={evaluate}
+                onGenerate={generate}
+                onStatus={updateStatus}
+              />
+            ))}
+          </div>
+        ) : null}
       </section>
     </main>
   );

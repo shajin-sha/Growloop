@@ -32,7 +32,7 @@ export function CreateExperimentForm({ onCreate }: CreateExperimentFormProps) {
   }
 
   return (
-    <form className="grid gap-4 border-b border-border bg-background p-5 lg:grid-cols-[1fr_1fr_180px_auto]" onSubmit={submit}>
+    <form className="grid gap-4 bg-background p-5 lg:grid-cols-[1fr_1fr_180px_auto]" onSubmit={submit}>
       <label className="grid gap-1.5">
         <span className="text-xs font-medium text-muted-foreground">Experiment</span>
         <input

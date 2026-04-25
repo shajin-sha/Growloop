@@ -4,6 +4,7 @@ import { App } from "@octokit/app";
 
 import { env } from "../../../config/env";
 import { logger } from "../../../logger";
+import type { GitHubInstallationRepository } from "./repositories/github-installation.repository";
 
 export type PullRequestInput = {
   repoFullName: string;
@@ -26,6 +27,12 @@ export type PullRequestStatusResult = {
   title: string;
 };
 
+export type GitHubInstallationDetails = {
+  installationId: number;
+  accountLogin: string;
+  targetType: string;
+};
+
 export interface PullRequestClient {
   createPullRequest(input: PullRequestInput): Promise<PullRequestResult>;
   getPullRequestStatus(
@@ -38,6 +45,8 @@ export interface PullRequestClient {
 }
 
 export class GitHubAppClient implements PullRequestClient {
+  constructor(private readonly installations: GitHubInstallationRepository) {}
+
   async createPullRequest(input: PullRequestInput): Promise<PullRequestResult> {
     const octokit = await this.createInstallationClient();
     const [owner, repo] = input.repoFullName.split("/");
@@ -127,17 +136,43 @@ export class GitHubAppClient implements PullRequestClient {
     });
   }
 
+  async getInstallationDetails(installationId: number): Promise<GitHubInstallationDetails> {
+    const app = await this.createApp();
+    const result = await app.octokit.request("GET /app/installations/{installation_id}", {
+      installation_id: installationId
+    });
+
+    return {
+      installationId: result.data.id,
+      accountLogin: getAccountLogin(result.data.account),
+      targetType: result.data.target_type
+    };
+  }
+
   private async createInstallationClient() {
-    if (!env.GITHUB_APP_ID || !env.GITHUB_APP_INSTALLATION_ID) {
+    if (!env.GITHUB_APP_ID) {
       throw new Error("GitHub App environment variables are not configured");
     }
 
-    const app = new App({
+    const installation = await this.installations.findLatest();
+
+    if (!installation) {
+      throw new Error("GitHub App is not installed");
+    }
+
+    const app = await this.createApp();
+    return app.getInstallationOctokit(installation.installationId);
+  }
+
+  private async createApp() {
+    if (!env.GITHUB_APP_ID) {
+      throw new Error("GitHub App ID is not configured");
+    }
+
+    return new App({
       appId: env.GITHUB_APP_ID,
       privateKey: await this.getPrivateKey()
     });
-
-    return app.getInstallationOctokit(Number(env.GITHUB_APP_INSTALLATION_ID));
   }
 
   private async getPrivateKey() {
@@ -161,4 +196,8 @@ export class GitHubAppClient implements PullRequestClient {
 
     return [owner, repo] as const;
   }
+}
+
+function getAccountLogin(account: { login?: string; slug?: string } | null | undefined) {
+  return account?.login ?? account?.slug ?? "unknown";
 }

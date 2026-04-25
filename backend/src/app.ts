@@ -11,13 +11,15 @@ import { WinnerDetectionService } from "./features/experiments/services/winner-d
 import { E2BCodexVariantGenerator } from "./features/integrations/e2b-codex/e2b-codex-generator";
 import { createGitHubAppRouter } from "./features/integrations/github/api/github-app.controller";
 import { GitHubAppClient } from "./features/integrations/github/github-app-client";
+import { PostgresGitHubInstallationRepository } from "./features/integrations/github/repositories/postgres-github-installation.repository";
 import { errorHandler } from "./middleware/error-handler";
 
 export function createApp() {
   const app = express();
   const repository = new PostgresExperimentRepository(pool);
+  const githubInstallations = new PostgresGitHubInstallationRepository(pool);
   const winnerDetection = new WinnerDetectionService();
-  const github = new GitHubAppClient();
+  const github = new GitHubAppClient(githubInstallations);
   const generator = new E2BCodexVariantGenerator();
   const service = new ExperimentService(repository, winnerDetection, github, generator);
 
@@ -30,7 +32,7 @@ export function createApp() {
   });
 
   app.use("/api", createExperimentsRouter(service));
-  app.use("/api", createGitHubAppRouter());
+  app.use("/api", createGitHubAppRouter(github, githubInstallations));
   app.use(errorHandler);
 
   return app;

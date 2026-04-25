@@ -35,7 +35,7 @@ export function ExperimentsPage() {
               <Button asChild variant={githubApp.configured ? "outline" : "secondary"}>
                 <a href={githubApp.installUrl} rel="noreferrer" target="_blank">
                   <Github size={16} />
-                  {githubApp.configured ? "GitHub App" : "Install GitHub App"}
+                  {githubApp.configured ? "GitHub Connected" : "Install GitHub App"}
                 </a>
               </Button>
             ) : null}

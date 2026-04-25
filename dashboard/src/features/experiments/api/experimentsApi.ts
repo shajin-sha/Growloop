@@ -19,6 +19,11 @@ type ExperimentsResponse = {
 export type GitHubAppInfo = {
   configured: boolean;
   installUrl: string | null;
+  installation: {
+    installationId: number;
+    accountLogin: string;
+    targetType: string;
+  } | null;
   slug: string | null;
 };
 
@@ -54,6 +59,13 @@ export async function listExperiments() {
 export async function getGitHubAppInfo() {
   const body = await request<GitHubAppResponse>("/api/github/app");
   return body.app;
+}
+
+export async function registerGitHubInstallation(installationId: number, setupAction?: string) {
+  await request<{ installation: GitHubAppInfo["installation"] }>("/api/github/installations", {
+    method: "POST",
+    body: JSON.stringify({ installationId, setupAction })
+  });
 }
 
 export async function createExperiment(values: CreateExperimentFormValues) {

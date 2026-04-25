@@ -53,3 +53,12 @@ create index if not exists experiment_events_lookup_idx
 
 create index if not exists experiment_events_created_at_idx
   on experiment_events (created_at);
+
+create table if not exists github_app_installations (
+  installation_id bigint primary key,
+  account_login text not null,
+  target_type text not null,
+  setup_action text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);

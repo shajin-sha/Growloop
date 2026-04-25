@@ -20,7 +20,7 @@ const styles: Record<ExperimentStatus, string> = {
 
 export function ExperimentStatusBadge({ status }: { status: ExperimentStatus }) {
   return (
-    <span className={cn("rounded-full border px-2 py-0.5 text-xs font-medium", styles[status])}>
+    <span className={cn("rounded-full border px-1.5 py-0.5 text-[11px] font-medium leading-none", styles[status])}>
       {labels[status]}
     </span>
   );

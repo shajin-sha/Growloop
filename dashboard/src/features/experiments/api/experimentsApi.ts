@@ -1,8 +1,8 @@
-import type { ExperimentSummary } from "@growloop/shared";
+import type { ExperimentSummary, GoalSummary } from "@growloop/shared";
 
 import { dashboardLogger } from "@/lib/logger";
 
-import type { CreateExperimentFormValues, ExperimentAction } from "../types/experiment.types";
+import type { CreateGoalFormValues, ExperimentAction, GoalAction } from "../types/experiment.types";
 
 const API_URL =
   import.meta.env.VITE_API_URL ??
@@ -14,6 +14,14 @@ type ExperimentResponse = {
 
 type ExperimentsResponse = {
   experiments: ExperimentSummary[];
+};
+
+type GoalResponse = {
+  goal: GoalSummary;
+};
+
+type GoalsResponse = {
+  goals: GoalSummary[];
 };
 
 export type GitHubAppInfo = {
@@ -56,6 +64,11 @@ export async function listExperiments() {
   return body.experiments;
 }
 
+export async function listGoals() {
+  const body = await request<GoalsResponse>("/api/goals");
+  return body.goals;
+}
+
 export async function getGitHubAppInfo() {
   const body = await request<GitHubAppResponse>("/api/github/app");
   return body.app;
@@ -68,7 +81,23 @@ export async function registerGitHubInstallation(installationId: number, setupAc
   });
 }
 
-export async function createExperiment(values: CreateExperimentFormValues) {
+export async function createGoal(values: CreateGoalFormValues) {
+  const body = await request<GoalResponse>("/api/goals", {
+    method: "POST",
+    body: JSON.stringify({
+      title: values.title
+    })
+  });
+
+  return body.goal;
+}
+
+export async function createExperiment(values: {
+  goalId?: string | null;
+  name: string;
+  repoFullName: string;
+  conversionEvent: string;
+}) {
   const body = await request<ExperimentResponse>("/api/experiments", {
     method: "POST",
     body: JSON.stringify({
@@ -81,6 +110,36 @@ export async function createExperiment(values: CreateExperimentFormValues) {
   });
 
   return body.experiment;
+}
+
+export async function deleteGoal(id: string): Promise<void> {
+  await request<void>(`/api/goals/${id}`, { method: "DELETE" });
+}
+
+export type GenerationStepStatus = {
+  experimentId: string;
+  step: "planning" | "cloning" | "generating" | "pushing" | "opening_pr" | "done" | "failed";
+  message: string;
+  updatedAt: string;
+};
+
+export type GoalGenerationStatus = {
+  goalId: string;
+  experiments: GenerationStepStatus[];
+} | null;
+
+export async function getGoalGenerationStatus(id: string): Promise<GoalGenerationStatus> {
+  const body = await request<{ status: GoalGenerationStatus }>(`/api/goals/${id}/generation-status`);
+  return body.status;
+}
+
+export async function updateGoalStatus(id: string, status: GoalAction) {
+  const body = await request<GoalResponse>(`/api/goals/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status })
+  });
+
+  return body.goal;
 }
 
 export async function updateExperimentStatus(id: string, status: ExperimentAction) {

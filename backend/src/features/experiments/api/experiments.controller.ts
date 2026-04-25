@@ -2,11 +2,14 @@ import { Router } from "express";
 import { z } from "zod";
 
 import type { ExperimentService } from "../services/experiment.service";
+import { getGenerationStatus } from "../services/generation-status";
 
 const createExperimentSchema = z.object({
+  goalId: z.string().uuid().nullable().optional(),
   name: z.string().min(2),
   repoFullName: z.string().regex(/^[^/]+\/[^/]+$/),
   conversionEvent: z.string().min(1),
+  trafficWeight: z.number().int().positive().optional(),
   variants: z
     .array(
       z.object({
@@ -15,6 +18,13 @@ const createExperimentSchema = z.object({
       })
     )
     .min(2)
+});
+
+const createGoalSchema = z.object({
+  title: z.string().min(2),
+  repoFullName: z.string().regex(/^[^/]+\/[^/]+$/).optional(),
+  conversionEvent: z.string().min(1).optional(),
+  experimentCount: z.number().int().min(1).max(4).optional()
 });
 
 const statusSchema = z.object({
@@ -37,6 +47,74 @@ const generateSchema = z.object({
 
 export function createExperimentsRouter(service: ExperimentService) {
   const router = Router();
+
+  router.get("/goals", async (_request, response, next) => {
+    try {
+      response.json({ goals: await service.listGoals() });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/goals", async (request, response, next) => {
+    try {
+      const input = createGoalSchema.parse(request.body);
+      response.status(201).json({ goal: await service.createGoal(input) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/goals/:id", async (request, response, next) => {
+    try {
+      const goal = await service.getGoal(request.params.id);
+
+      if (!goal) {
+        response.status(404).json({ error: "Goal not found" });
+        return;
+      }
+
+      response.json({ goal });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.delete("/goals/:id", async (request, response, next) => {
+    try {
+      const deleted = await service.deleteGoal(request.params.id);
+
+      if (!deleted) {
+        response.status(404).json({ error: "Goal not found" });
+        return;
+      }
+
+      response.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/goals/:id/generation-status", (request, response) => {
+    const status = getGenerationStatus(request.params.id);
+    response.json({ status });
+  });
+
+  router.patch("/goals/:id/status", async (request, response, next) => {
+    try {
+      const input = statusSchema.parse(request.body);
+      const goal = await service.updateGoalStatus(request.params.id, input.status);
+
+      if (!goal) {
+        response.status(404).json({ error: "Goal not found" });
+        return;
+      }
+
+      response.json({ goal });
+    } catch (error) {
+      next(error);
+    }
+  });
 
   router.get("/experiments", async (_request, response, next) => {
     try {
@@ -135,6 +213,21 @@ export function createExperimentsRouter(service: ExperimentService) {
       }
 
       response.json({ experiment });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/sdk/goals/:id", async (request, response, next) => {
+    try {
+      const goal = await service.getGoalSdkConfig(request.params.id);
+
+      if (!goal) {
+        response.status(404).json({ error: "Goal not found" });
+        return;
+      }
+
+      response.json({ goal });
     } catch (error) {
       next(error);
     }

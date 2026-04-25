@@ -3,16 +3,14 @@ import { type FormEvent, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
-import type { CreateExperimentFormValues } from "../types/experiment.types";
+import type { CreateGoalFormValues } from "../types/experiment.types";
 
 type CreateExperimentFormProps = {
-  onCreate(values: CreateExperimentFormValues): Promise<void>;
+  onCreate(values: CreateGoalFormValues): Promise<void>;
 };
 
-const initialValues: CreateExperimentFormValues = {
-  name: "",
-  repoFullName: "",
-  conversionEvent: "signup"
+const initialValues: CreateGoalFormValues = {
+  title: ""
 };
 
 export function CreateExperimentForm({ onCreate }: CreateExperimentFormProps) {
@@ -32,41 +30,28 @@ export function CreateExperimentForm({ onCreate }: CreateExperimentFormProps) {
   }
 
   return (
-    <form className="grid gap-4 bg-background p-5 lg:grid-cols-[1fr_1fr_180px_auto]" onSubmit={submit}>
-      <label className="grid gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Experiment</span>
+    <form
+      className="flex max-w-lg flex-col gap-2 sm:flex-row sm:items-center"
+      onSubmit={submit}
+    >
+      <label className="min-w-0 flex-1">
+        <span className="sr-only">Goal</span>
         <input
-          className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-primary"
-          onChange={(event) => setValues({ ...values, name: event.target.value })}
-          placeholder="Homepage CTA"
+          className="h-11 w-full rounded-full border border-border bg-background px-4 text-sm outline-none transition placeholder:text-muted-foreground/70 hover:border-foreground/20 focus:border-foreground/40"
+          onChange={(event) => setValues({ ...values, title: event.target.value })}
+          placeholder="Add a goal..."
           required
-          value={values.name}
+          value={values.title}
         />
       </label>
-      <label className="grid gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Repository</span>
-        <input
-          className="h-10 rounded-md border border-input bg-background px-3 font-mono text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-primary"
-          onChange={(event) => setValues({ ...values, repoFullName: event.target.value })}
-          placeholder="owner/repo"
-          required
-          value={values.repoFullName}
-        />
-      </label>
-      <label className="grid gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Event</span>
-        <input
-          className="h-10 rounded-md border border-input bg-background px-3 font-mono text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-primary"
-          onChange={(event) => setValues({ ...values, conversionEvent: event.target.value })}
-          placeholder="signup"
-          required
-          value={values.conversionEvent}
-        />
-      </label>
-      <div className="flex items-end">
-        <Button className="h-10 w-full lg:w-auto" disabled={isSubmitting} type="submit">
+      <div className="flex">
+        <Button
+          className="h-11 w-full shrink-0 rounded-full px-4 sm:w-auto"
+          disabled={isSubmitting}
+          type="submit"
+        >
           <Plus size={16} />
-          Create
+          Add goal
         </Button>
       </div>
     </form>

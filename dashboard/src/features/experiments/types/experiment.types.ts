@@ -1,11 +1,17 @@
-import type { ExperimentSummary } from "@growloop/shared";
+import type { ExperimentSummary, GoalSummary, GoalStatus } from "@growloop/shared";
 
-export type CreateExperimentFormValues = {
-  name: string;
-  repoFullName: string;
-  conversionEvent: string;
+export type CreateGoalFormValues = {
+  title: string;
 };
 
 export type ExperimentAction = "running" | "paused" | "killed";
+export type GoalAction = Extract<GoalStatus, "running" | "paused" | "killed">;
 
-export type ExperimentViewModel = ExperimentSummary;
+export type ExperimentViewModel = ExperimentSummary & {
+  isPending?: boolean;
+};
+
+export type GoalViewModel = Omit<GoalSummary, "experiments"> & {
+  experiments: ExperimentViewModel[];
+  isPending?: boolean;
+};

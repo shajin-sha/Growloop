@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  createExperiment,
+  createGoal,
+  deleteGoal,
   evaluateExperiment,
   generateExperiment,
-  listExperiments,
+  listGoals,
+  updateGoalStatus,
   updateExperimentStatus
 } from "../api/experimentsApi";
 import type {
-  CreateExperimentFormValues,
+  CreateGoalFormValues,
   ExperimentAction,
-  ExperimentViewModel
+  GoalAction,
+  GoalViewModel
 } from "../types/experiment.types";
 
 export function useExperiments() {
-  const [experiments, setExperiments] = useState<ExperimentViewModel[]>([]);
+  const [goals, setGoals] = useState<GoalViewModel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +26,7 @@ export function useExperiments() {
     setError(null);
 
     try {
-      setExperiments(await listExperiments());
+      setGoals(await listGoals());
     } catch {
       setError("Backend is not reachable");
     } finally {
@@ -35,14 +38,40 @@ export function useExperiments() {
     void refresh();
   }, [refresh]);
 
-  const create = async (values: CreateExperimentFormValues) => {
-    const experiment = await createExperiment(values);
-    setExperiments((current) => [experiment, ...current]);
+  const create = async (values: CreateGoalFormValues) => {
+    const optimisticGoal = createOptimisticGoal(values.title);
+    setGoals((current) => [optimisticGoal, ...current]);
+    setError(null);
+
+    try {
+      const [goal] = await Promise.all([createGoal(values), waitForPlanningPreview()]);
+      replaceGoal(setGoals, goal, optimisticGoal.id);
+    } catch {
+      setGoals((current) => current.filter((goal) => goal.id !== optimisticGoal.id));
+      setError("Goal could not be created");
+    }
+  };
+
+  const updateGoal = async (id: string, status: GoalAction) => {
+    const goal = await updateGoalStatus(id, status);
+    replaceGoal(setGoals, goal);
+  };
+
+  const removeGoal = async (id: string) => {
+    setGoals((current) => current.filter((goal) => goal.id !== id));
+    setError(null);
+
+    try {
+      await deleteGoal(id);
+    } catch {
+      setError("Goal could not be deleted");
+      await refresh();
+    }
   };
 
   const updateStatus = async (id: string, status: ExperimentAction) => {
     const experiment = await updateExperimentStatus(id, status);
-    replaceExperiment(setExperiments, experiment);
+    replaceExperiment(setGoals, experiment);
   };
 
   const evaluate = async (id: string) => {
@@ -52,14 +81,16 @@ export function useExperiments() {
 
   const generate = async (id: string, goal: string) => {
     const experiment = await generateExperiment(id, goal);
-    replaceExperiment(setExperiments, experiment);
+    replaceExperiment(setGoals, experiment);
   };
 
   return {
-    experiments,
+    goals,
     isLoading,
     error,
     create,
+    updateGoal,
+    removeGoal,
     updateStatus,
     evaluate,
     generate,
@@ -67,9 +98,64 @@ export function useExperiments() {
   };
 }
 
-function replaceExperiment(
-  setExperiments: (update: (current: ExperimentViewModel[]) => ExperimentViewModel[]) => void,
-  experiment: ExperimentViewModel
+function replaceGoal(
+  setGoals: (update: (current: GoalViewModel[]) => GoalViewModel[]) => void,
+  goal: GoalViewModel,
+  replaceId = goal.id
 ) {
-  setExperiments((current) => current.map((item) => (item.id === experiment.id ? experiment : item)));
+  setGoals((current) => current.map((item) => (item.id === replaceId ? goal : item)));
+}
+
+function replaceExperiment(
+  setGoals: (update: (current: GoalViewModel[]) => GoalViewModel[]) => void,
+  experiment: GoalViewModel["experiments"][number]
+) {
+  setGoals((current) =>
+    current.map((goal) => ({
+      ...goal,
+      experiments: goal.experiments.map((item) => (item.id === experiment.id ? experiment : item))
+    }))
+  );
+}
+
+function waitForPlanningPreview() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, 1400);
+  });
+}
+
+function createOptimisticGoal(title: string): GoalViewModel {
+  const now = new Date().toISOString();
+  const goalId = `pending-goal-${crypto.randomUUID()}`;
+
+  return {
+    id: goalId,
+    title,
+    repoFullName: "",
+    conversionEvent: "",
+    status: "draft",
+    createdAt: now,
+    updatedAt: now,
+    isPending: true,
+    experiments: Array.from({ length: 4 }, (_, index) => {
+      const experimentId = `${goalId}-experiment-${index + 1}`;
+
+      return {
+        id: experimentId,
+        goalId,
+        name: `Experiment ${index + 1}`,
+        description: null,
+        repoFullName: "",
+        conversionEvent: "",
+        status: "draft",
+        trafficWeight: 1,
+        winnerVariantId: null,
+        createdAt: now,
+        updatedAt: now,
+        isPending: true,
+        variants: [],
+        metrics: []
+      };
+    })
+  };
 }

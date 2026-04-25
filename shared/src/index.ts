@@ -2,6 +2,8 @@ export type ExperimentStatus = "draft" | "running" | "paused" | "completed" | "k
 
 export type VariantStatus = "active" | "winner" | "loser" | "reverted";
 
+export type GoalStatus = "draft" | "running" | "paused" | "completed" | "killed";
+
 export type ExperimentVariant = {
   id: string;
   experimentId: string;
@@ -25,10 +27,13 @@ export type PullRequestStatus = {
 
 export type Experiment = {
   id: string;
+  goalId: string | null;
   name: string;
+  description: string | null;
   repoFullName: string;
   conversionEvent: string;
   status: ExperimentStatus;
+  trafficWeight: number;
   winnerVariantId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +51,20 @@ export type ExperimentSummary = Experiment & {
   metrics: ExperimentMetric[];
 };
 
+export type Goal = {
+  id: string;
+  title: string;
+  repoFullName: string;
+  conversionEvent: string;
+  status: GoalStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GoalSummary = Goal & {
+  experiments: ExperimentSummary[];
+};
+
 export type SdkExperimentConfig = {
   id: string;
   conversionEvent: string;
@@ -54,6 +73,22 @@ export type SdkExperimentConfig = {
     id: string;
     name: string;
     weight: number;
+  }>;
+};
+
+export type SdkGoalConfig = {
+  id: string;
+  conversionEvent: string;
+  status: GoalStatus;
+  experiments: Array<{
+    id: string;
+    name: string;
+    weight: number;
+    variants: Array<{
+      id: string;
+      name: string;
+      weight: number;
+    }>;
   }>;
 };
 

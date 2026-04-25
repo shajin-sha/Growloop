@@ -23,9 +23,10 @@ const envSchema = z.object({
   E2B_API_KEY: z.string().optional(),
   E2B_TEMPLATE: z.string().default("codex"),
   E2B_SANDBOX_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+  GROWLOOP_REPO_FULL_NAME: z.string().regex(/^[^/]+\/[^/]+$/).default("growloop/web"),
   OPENAI_API_KEY: z.string().optional(),
   CODEX_API_KEY: z.string().optional(),
-  CODEX_COMMAND: z.string().default("codex")
+  CODEX_COMMAND: z.string().default("codex -c model_reasoning_effort=low")
 });
 
 export const env = envSchema.parse(process.env);

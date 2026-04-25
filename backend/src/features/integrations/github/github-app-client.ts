@@ -42,6 +42,7 @@ export interface PullRequestClient {
   closePullRequest(repoFullName: string, pullRequestNumber: number): Promise<void>;
   mergePullRequest(repoFullName: string, pullRequestNumber: number): Promise<void>;
   deleteBranch(repoFullName: string, branchName: string): Promise<void>;
+  listInstallationRepos(): Promise<string[]>;
 }
 
 export interface GitHubInstallationTokenProvider {
@@ -49,7 +50,7 @@ export interface GitHubInstallationTokenProvider {
 }
 
 export class GitHubAppClient implements PullRequestClient {
-  constructor(private readonly installations: GitHubInstallationRepository) {}
+  constructor(private readonly installations: GitHubInstallationRepository) { }
 
   async createPullRequest(input: PullRequestInput): Promise<PullRequestResult> {
     const octokit = await this.createInstallationClient();
@@ -138,6 +139,15 @@ export class GitHubAppClient implements PullRequestClient {
       repo,
       ref: `heads/${branchName}`
     });
+  }
+
+  async listInstallationRepos(): Promise<string[]> {
+    const octokit = await this.createInstallationClient();
+    const result = await octokit.request("GET /installation/repositories", {
+      per_page: 100
+    });
+
+    return result.data.repositories.map((repo: { full_name: string }) => repo.full_name);
   }
 
   async getInstallationDetails(installationId: number): Promise<GitHubInstallationDetails> {

@@ -13,23 +13,171 @@ export type GeneratedVariant = {
   pullRequestBody: string;
 };
 
+export type GeneratedExperimentPlan = {
+  name: string;
+  description: string;
+};
+
 export type GenerateVariantsInput = {
   experimentId: string;
+  goalId?: string;
+  conversionEvent?: string;
   repoFullName: string;
   goal: string;
   allowList: string[];
   variantNames?: string[];
 };
 
+export type PlanGoalExperimentsInput = {
+  goal: string;
+  count: number;
+  repoFullName: string;
+};
+
 export interface VariantGenerator {
+  planGoalExperiments(input: PlanGoalExperimentsInput): Promise<GeneratedExperimentPlan[]>;
   generate(input: GenerateVariantsInput): Promise<GeneratedVariant[]>;
 }
 
 const REPO_PATH = "/home/user/repo";
 const GITHUB_USERNAME = "x-access-token";
+const CODEX_PLANNING_SYSTEM_PROMPT = [
+  "You are a Growloop experiment planner.",
+  "You have access to a cloned repository. Your job is to explore the codebase, understand its structure,",
+  "and propose focused A/B experiment ideas for the given goal.",
+  "",
+  "## Instructions",
+  "1. Explore the repository — look at the file tree, package.json, key components, pages, routes, and any existing analytics or tracking.",
+  "2. Understand what the app does and how the goal relates to the codebase.",
+  "3. Propose experiment ideas that target REAL files and components you found in the repo.",
+  "4. Each experiment should target a different lever (copy, layout, trust, urgency, UX friction, etc.).",
+  "5. Keep names short (2-5 words). Descriptions should be one specific sentence referencing actual files or components.",
+  "",
+  "## Output",
+  "Write ONLY a JSON array to /tmp/plans.json with this format:",
+  '[{"name": "Short name", "description": "One sentence describing the specific change and which file/component it targets."}]',
+  "",
+  "Do NOT write anything else. Do NOT modify any source files. Only write /tmp/plans.json."
+].join("\n");
+
+
+const CODEX_EXPERIMENT_SYSTEM_PROMPT = [
+  "You are the Codex agent running a Growloop conversion experiment.",
+  "Your only job is to create one small, production-safe code patch that helps the supplied goal.",
+  "",
+  "## Step 1 — Search for existing Growloop SDK usage",
+  "Before writing any code, search the repository for existing Growloop SDK usage:",
+  "  grep -r 'growloop' . --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' -l 2>/dev/null",
+  "  grep -r '@growloop/sdk\\|createGrowloop\\|window.Growloop\\|data-goal-id\\|data-experiment-id' . --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' -l 2>/dev/null",
+  "  cat package.json 2>/dev/null | grep growloop",
+  "  find . -name 'package.json' -not -path '*/node_modules/*' -exec grep -l growloop {} \\;",
+  "",
+  "## Step 2 — Decide SDK integration approach",
+  "If the SDK is already installed and initialized:",
+  "  - Reuse the existing GrowloopClient instance. Do NOT create a second one.",
+  "  - Call client.track('<conversion_event>') at the conversion point for this experiment.",
+  "  - If the existing init uses goalId, ensure this experiment's goalId is passed.",
+  "",
+  "If the SDK is NOT yet present in the repo:",
+  "  - Add @growloop/sdk as a dependency in the relevant package.json.",
+  "  - Initialize once at the app entry point using goalId (not experimentId) so the SDK assigns each visitor to exactly one experiment under the goal:",
+  "      import { createGrowloop } from '@growloop/sdk';",
+  "      const growloop = createGrowloop({ apiUrl: '<GROWLOOP_API_URL>', goalId: '<GOAL_ID>' });",
+  "  - Replace <GROWLOOP_API_URL> with the value from the repo's existing API_URL env var, or leave a TODO comment.",
+  "  - Replace <GOAL_ID> with the goalId provided in the experiment context.",
+  "  - Export or attach the client so conversion tracking can call growloop.track('<conversion_event>').",
+  "",
+  "## Step 3 — Make the experiment change",
+  "  - Make the smallest useful UI, copy, funnel, or activation change that plausibly improves the goal.",
+  "  - Gate the change on the assigned variantId from the SDK: only show the patch to visitors assigned to this variant.",
+  "  - Use the SDK assignment: const assignment = growloop.getAssignment(); if (assignment?.variantId === '<VARIANT_ID>') { /* show patch */ }",
+  "  - Keep the change reversible and isolated to the allowed paths.",
+  "  - Do not render or expose all experiments to the same visitor.",
+  "",
+  "## Rules",
+  "  - Do not create external accounts, credentials, migrations, or background jobs unless the repo already has a clear local pattern.",
+  "  - Do not commit, push, open pull requests, or talk to anyone. Growloop handles GitHub after you finish.",
+  "  - Use the goal as the source of truth. Do not invent unrelated product strategy."
+].join("\n");
 
 export class E2BCodexVariantGenerator implements VariantGenerator {
-  constructor(private readonly github: GitHubInstallationTokenProvider) {}
+  constructor(private readonly github: GitHubInstallationTokenProvider) { }
+
+  async planGoalExperiments(input: PlanGoalExperimentsInput): Promise<GeneratedExperimentPlan[]> {
+    if (!getCodexApiKey()) throw new Error("OPENAI_API_KEY or CODEX_API_KEY is required");
+    if (!env.E2B_API_KEY) throw new Error("E2B_API_KEY is required");
+
+    const token = await this.github.createInstallationToken();
+
+    const sandbox = await Sandbox.create(env.E2B_TEMPLATE, {
+      apiKey: env.E2B_API_KEY,
+      timeoutMs: env.E2B_SANDBOX_TIMEOUT_MS,
+      envs: { ...getCodexEnvironment() }
+    });
+
+    logger.info("Planning experiments via Codex", {
+      module: "e2b-codex",
+      repoFullName: input.repoFullName,
+      goal: input.goal,
+      sandboxId: sandbox.sandboxId
+    });
+
+    try {
+      await sandbox.git.clone(`https://github.com/${input.repoFullName}.git`, {
+        path: REPO_PATH,
+        branch: "main",
+        depth: 1,
+        username: GITHUB_USERNAME,
+        password: token,
+        timeoutMs: 120_000
+      });
+
+      const prompt = [
+        CODEX_PLANNING_SYSTEM_PROMPT,
+        "",
+        `Goal: "${input.goal}"`,
+        `Number of experiments to propose: ${input.count}`,
+        "",
+        "Explore the codebase now and write /tmp/plans.json."
+      ].join("\n");
+
+      try {
+        await sandbox.commands.run(
+          `${env.CODEX_COMMAND} exec --full-auto --skip-git-repo-check -C ${REPO_PATH} ${shellQuote(prompt)}`,
+          { envs: getCodexEnvironment(), timeoutMs: 300_000 }
+        );
+      } catch (error) {
+        logger.error("Codex planning command failed", {
+          module: "e2b-codex",
+          repoFullName: input.repoFullName,
+          sandboxId: sandbox.sandboxId,
+          error: getErrorMessage(error),
+          stdout: getCommandOutput(error, "stdout"),
+          stderr: getCommandOutput(error, "stderr")
+        });
+        throw error;
+      }
+
+      const result = await sandbox.commands.run("cat /tmp/plans.json", { timeoutMs: 10_000 });
+      const raw = result.stdout.trim();
+
+      if (!raw) throw new Error("Codex did not produce /tmp/plans.json");
+
+      const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      const parsed = JSON.parse(jsonStr) as Array<{ name: string; description: string }>;
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error("Codex produced invalid plans JSON");
+      }
+
+      return parsed.slice(0, input.count).map((item) => ({
+        name: String(item.name || "Experiment"),
+        description: String(item.description || "Codex-generated experiment plan.")
+      }));
+    } finally {
+      await sandbox.kill().catch(() => { });
+    }
+  }
 
   async generate(input: GenerateVariantsInput): Promise<GeneratedVariant[]> {
     const variants = input.variantNames?.length ? input.variantNames : ["Variant A", "Variant B"];
@@ -156,14 +304,19 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
     plan: GeneratedVariant
   ): Promise<void> {
     const prompt = [
-      "You are implementing a Growloop conversion experiment variant.",
-      `Variant name: ${plan.name}`,
+      "SYSTEM PROMPT FOR CODEX AGENT",
+      CODEX_EXPERIMENT_SYSTEM_PROMPT,
+      "",
+      "EXPERIMENT CONTEXT",
       `Goal: ${input.goal}`,
+      `Goal ID: ${input.goalId ?? "not provided"}`,
+      `Experiment ID: ${input.experimentId}`,
+      `Conversion event: ${input.conversionEvent ?? "not provided"}`,
+      `Variant name: ${plan.name}`,
       `Allowed paths: ${input.allowList.join(", ") || "none provided"}`,
       "",
-      "Keep the change small, reversible, and production-safe.",
-      "Only edit files needed for this experiment variant.",
-      "Do not commit, push, or open a pull request."
+      "TASK",
+      "Implement this single experiment variant now. Make the smallest useful code change that can plausibly improve the goal."
     ].join("\n");
 
     try {

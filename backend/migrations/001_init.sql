@@ -1,15 +1,41 @@
-create table if not exists experiments (
+create table if not exists goals (
   id uuid primary key,
-  name text not null,
+  title text not null,
   repo_full_name text not null,
   conversion_event text not null,
   status text not null default 'draft',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint goals_status_check
+    check (status in ('draft', 'running', 'paused', 'completed', 'killed'))
+);
+
+create table if not exists experiments (
+  id uuid primary key,
+  goal_id uuid references goals(id) on delete cascade,
+  name text not null,
+  description text,
+  repo_full_name text not null,
+  conversion_event text not null,
+  status text not null default 'draft',
+  traffic_weight integer not null default 1,
   winner_variant_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint experiments_status_check
-    check (status in ('draft', 'running', 'paused', 'completed', 'killed'))
+    check (status in ('draft', 'running', 'paused', 'completed', 'killed')),
+  constraint experiments_traffic_weight_check
+    check (traffic_weight > 0)
 );
+
+alter table experiments
+  add column if not exists goal_id uuid references goals(id) on delete cascade;
+
+alter table experiments
+  add column if not exists traffic_weight integer not null default 1;
+
+alter table experiments
+  add column if not exists description text;
 
 create table if not exists experiment_variants (
   id uuid primary key,

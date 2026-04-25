@@ -3,19 +3,156 @@ import { randomUUID } from "node:crypto";
 import type { DbPool } from "../../../db/pool";
 import type {
   CreateExperimentInput,
+  CreateGoalRecordInput,
   Experiment,
   ExperimentMetric,
   ExperimentVariant,
   ExperimentStatus,
+  Goal,
+  GoalStatus,
+  SdkGoalConfig,
   SdkExperimentConfig,
   TrackEventPayload,
   VariantStatus
 } from "../types/experiment.types";
 import type { ExperimentRepository } from "./experiment.repository";
-import { mapExperiment, mapVariant } from "./postgres-experiment.mapper";
+import { mapExperiment, mapGoal, mapVariant } from "./postgres-experiment.mapper";
 
 export class PostgresExperimentRepository implements ExperimentRepository {
-  constructor(private readonly db: DbPool) {}
+  constructor(private readonly db: DbPool) { }
+
+  async createGoal(input: CreateGoalRecordInput): Promise<Goal> {
+    const client = await this.db.connect();
+    const goalId = randomUUID();
+
+    try {
+      await client.query("begin");
+      await client.query(
+        `insert into goals (id, title, repo_full_name, conversion_event, status)
+         values ($1, $2, $3, $4, 'running')`,
+        [goalId, input.title, input.repoFullName, input.conversionEvent]
+      );
+
+      for (const [index, plan] of input.experimentPlans.entries()) {
+        const experimentId = randomUUID();
+
+        await client.query(
+          `insert into experiments (
+             id,
+             goal_id,
+             name,
+             description,
+             repo_full_name,
+             conversion_event,
+             status,
+             traffic_weight
+           )
+           values ($1, $2, $3, $4, $5, $6, 'running', 1)`,
+          [
+            experimentId,
+            goalId,
+            plan.name,
+            plan.description,
+            input.repoFullName,
+            input.conversionEvent
+          ]
+        );
+        await client.query(
+          `insert into experiment_variants (id, experiment_id, name, weight)
+           values ($1, $2, $3, 1)`,
+          [randomUUID(), experimentId, `Patch ${index + 1}`]
+        );
+      }
+
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const goal = await this.findGoalById(goalId);
+
+    if (!goal) {
+      throw new Error("Created goal could not be loaded");
+    }
+
+    return goal;
+  }
+
+  async findGoals(): Promise<Goal[]> {
+    const goals = await this.db.query("select * from goals order by created_at desc");
+    return goals.rows.map(mapGoal);
+  }
+
+  async deleteGoal(id: string): Promise<boolean> {
+    const result = await this.db.query("delete from goals where id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async findGoalById(id: string): Promise<Goal | null> {
+    const goal = await this.db.query("select * from goals where id = $1", [id]);
+
+    if (goal.rowCount === 0) {
+      return null;
+    }
+
+    return mapGoal(goal.rows[0]);
+  }
+
+  async findGoalExperiments(goalId: string): Promise<Experiment[]> {
+    const experiments = await this.db.query(
+      "select * from experiments where goal_id = $1 order by created_at asc",
+      [goalId]
+    );
+
+    if (experiments.rowCount === 0) {
+      return [];
+    }
+
+    const experimentIds = experiments.rows.map((row) => row.id);
+    const variants = await this.db.query(
+      "select * from experiment_variants where experiment_id = any($1::uuid[]) order by created_at asc",
+      [experimentIds]
+    );
+    const variantsByExperiment = new Map<string, ExperimentVariant[]>();
+
+    for (const row of variants.rows) {
+      const items = variantsByExperiment.get(row.experiment_id) ?? [];
+      items.push(mapVariant(row));
+      variantsByExperiment.set(row.experiment_id, items);
+    }
+
+    return experiments.rows.map((row) => mapExperiment(row, variantsByExperiment.get(row.id) ?? []));
+  }
+
+  async findGoalSdkConfig(id: string): Promise<SdkGoalConfig | null> {
+    const goal = await this.findGoalById(id);
+
+    if (!goal) {
+      return null;
+    }
+
+    const experiments = await this.findGoalExperiments(id);
+
+    return {
+      id: goal.id,
+      conversionEvent: goal.conversionEvent,
+      status: goal.status,
+      experiments: experiments
+        .filter((experiment) => experiment.status === "running")
+        .map((experiment) => ({
+          id: experiment.id,
+          name: experiment.name,
+          weight: experiment.trafficWeight,
+          variants: experiment.variants
+            .filter((variant) => variant.status === "active")
+            .map((variant) => ({ id: variant.id, name: variant.name, weight: variant.weight }))
+        }))
+        .filter((experiment) => experiment.variants.length > 0)
+    };
+  }
 
   async create(input: CreateExperimentInput): Promise<Experiment> {
     const client = await this.db.connect();
@@ -24,10 +161,27 @@ export class PostgresExperimentRepository implements ExperimentRepository {
       await client.query("begin");
       const experimentId = randomUUID();
       const experiment = await client.query(
-        `insert into experiments (id, name, repo_full_name, conversion_event, status)
-         values ($1, $2, $3, $4, 'draft')
+        `insert into experiments (
+           id,
+           goal_id,
+           name,
+           description,
+           repo_full_name,
+           conversion_event,
+           status,
+           traffic_weight
+         )
+         values ($1, $2, $3, $4, $5, $6, 'draft', $7)
          returning *`,
-        [experimentId, input.name, input.repoFullName, input.conversionEvent]
+        [
+          experimentId,
+          input.goalId ?? null,
+          input.name,
+          input.description ?? null,
+          input.repoFullName,
+          input.conversionEvent,
+          input.trafficWeight ?? 1
+        ]
       );
 
       for (const variant of input.variants) {
@@ -149,6 +303,18 @@ export class PostgresExperimentRepository implements ExperimentRepository {
       status
     ]);
     return this.findById(id);
+  }
+
+  async updateGoalStatus(id: string, status: GoalStatus): Promise<Goal | null> {
+    await this.db.query("update goals set status = $2, updated_at = now() where id = $1", [
+      id,
+      status
+    ]);
+    await this.db.query(
+      "update experiments set status = $2, updated_at = now() where goal_id = $1 and status != 'completed'",
+      [id, status]
+    );
+    return this.findGoalById(id);
   }
 
   async markWinner(experimentId: string, winnerVariantId: string): Promise<Experiment | null> {

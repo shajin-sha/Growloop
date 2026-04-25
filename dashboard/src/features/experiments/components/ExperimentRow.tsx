@@ -20,6 +20,7 @@ import type { ExperimentAction, ExperimentViewModel } from "../types/experiment.
 
 type ExperimentRowProps = {
   experiment: ExperimentViewModel;
+  isDemo?: boolean;
   onEvaluate(id: string): Promise<void>;
   onGenerate(id: string, goal: string): Promise<void>;
   onStatus(id: string, status: ExperimentAction): Promise<void>;
@@ -41,6 +42,7 @@ function formatGoal(conversionEvent: string) {
 
 export function ExperimentRow({
   experiment,
+  isDemo = false,
   onEvaluate,
   onGenerate,
   onStatus
@@ -68,6 +70,11 @@ export function ExperimentRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <ExperimentStatusBadge status={experiment.status} />
+            {isDemo ? (
+              <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                Demo
+              </span>
+            ) : null}
             <span className="font-mono text-xs text-muted-foreground">{createdDate}</span>
           </div>
           <h2 className="mt-4 line-clamp-2 text-xl font-medium leading-snug">{experiment.name}</h2>

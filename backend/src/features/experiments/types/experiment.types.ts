@@ -4,6 +4,7 @@ import type {
   ExperimentStatus,
   ExperimentSummary,
   ExperimentVariant,
+  PullRequestStatus,
   SdkExperimentConfig,
   TrackEventPayload,
   VariantStatus
@@ -15,6 +16,7 @@ export type {
   ExperimentStatus,
   ExperimentSummary,
   ExperimentVariant,
+  PullRequestStatus,
   SdkExperimentConfig,
   TrackEventPayload,
   VariantStatus

@@ -5,6 +5,7 @@ import type {
   CreateExperimentInput,
   ExperimentSummary,
   ExperimentStatus,
+  PullRequestStatus,
   SdkExperimentConfig,
   TrackEventPayload,
   WinnerResult
@@ -94,7 +95,79 @@ export class ExperimentService {
         baseBranch: "main"
       });
 
-      await this.repository.attachPullRequest(variant.id, plan.branchName, pullRequest.url);
+      await this.repository.attachPullRequest(
+        variant.id,
+        plan.branchName,
+        pullRequest.number,
+        pullRequest.url
+      );
+    }
+
+    return this.withMetrics(id);
+  }
+
+  async getPullRequestStatuses(id: string): Promise<PullRequestStatus[]> {
+    const experiment = await this.repository.findById(id);
+
+    if (!experiment) {
+      throw new Error("Experiment not found");
+    }
+
+    return Promise.all(
+      experiment.variants.map(async (variant) => {
+        if (!variant.pullRequestNumber) {
+          return {
+            variantId: variant.id,
+            number: null,
+            url: variant.pullRequestUrl,
+            state: "unknown",
+            mergeable: null,
+            title: null
+          };
+        }
+
+        const status = await this.pullRequests.getPullRequestStatus(
+          experiment.repoFullName,
+          variant.pullRequestNumber
+        );
+
+        return {
+          variantId: variant.id,
+          number: status.number,
+          url: status.url,
+          state: status.state,
+          mergeable: status.mergeable,
+          title: status.title
+        };
+      })
+    );
+  }
+
+  async closeLosingPullRequests(id: string): Promise<ExperimentSummary> {
+    const experiment = await this.repository.findById(id);
+
+    if (!experiment) {
+      throw new Error("Experiment not found");
+    }
+
+    for (const variant of experiment.variants) {
+      if (variant.status !== "loser" || !variant.pullRequestNumber) {
+        continue;
+      }
+
+      const status = await this.pullRequests.getPullRequestStatus(
+        experiment.repoFullName,
+        variant.pullRequestNumber
+      );
+
+      if (status.state === "open") {
+        await this.pullRequests.closePullRequest(experiment.repoFullName, variant.pullRequestNumber);
+      }
+
+      if (variant.branchName && status.state !== "merged") {
+        await this.pullRequests.deleteBranch(experiment.repoFullName, variant.branchName);
+        await this.repository.updateVariantStatus(variant.id, "reverted");
+      }
     }
 
     return this.withMetrics(id);

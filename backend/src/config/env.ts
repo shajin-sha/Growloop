@@ -18,6 +18,7 @@ const envSchema = z.object({
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
   GITHUB_APP_INSTALLATION_ID: z.string().optional(),
+  GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
   E2B_API_KEY: z.string().optional(),
   CODEX_COMMAND: z.string().default("codex")
 });

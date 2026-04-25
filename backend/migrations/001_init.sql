@@ -18,6 +18,7 @@ create table if not exists experiment_variants (
   weight integer not null,
   status text not null default 'active',
   branch_name text,
+  pull_request_number integer,
   pull_request_url text,
   created_at timestamptz not null default now(),
   constraint experiment_variants_status_check
@@ -25,6 +26,9 @@ create table if not exists experiment_variants (
   constraint experiment_variants_weight_check
     check (weight > 0)
 );
+
+alter table experiment_variants
+  add column if not exists pull_request_number integer;
 
 alter table experiments
   drop constraint if exists experiments_winner_variant_fk;

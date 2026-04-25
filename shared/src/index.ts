@@ -9,8 +9,18 @@ export type ExperimentVariant = {
   weight: number;
   status: VariantStatus;
   branchName: string | null;
+  pullRequestNumber: number | null;
   pullRequestUrl: string | null;
   createdAt: string;
+};
+
+export type PullRequestStatus = {
+  variantId: string;
+  number: number | null;
+  url: string | null;
+  state: "open" | "closed" | "merged" | "unknown";
+  mergeable: boolean | null;
+  title: string | null;
 };
 
 export type Experiment = {

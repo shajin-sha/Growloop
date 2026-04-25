@@ -16,9 +16,23 @@ export type PullRequestResult = {
   number: number;
 };
 
+export type PullRequestStatusResult = {
+  number: number;
+  url: string;
+  state: "open" | "closed" | "merged";
+  mergeable: boolean | null;
+  title: string;
+};
+
 export interface PullRequestClient {
   createPullRequest(input: PullRequestInput): Promise<PullRequestResult>;
+  getPullRequestStatus(
+    repoFullName: string,
+    pullRequestNumber: number
+  ): Promise<PullRequestStatusResult>;
+  closePullRequest(repoFullName: string, pullRequestNumber: number): Promise<void>;
   mergePullRequest(repoFullName: string, pullRequestNumber: number): Promise<void>;
+  deleteBranch(repoFullName: string, branchName: string): Promise<void>;
 }
 
 export class GitHubAppClient implements PullRequestClient {
@@ -67,6 +81,50 @@ export class GitHubAppClient implements PullRequestClient {
     });
   }
 
+  async getPullRequestStatus(
+    repoFullName: string,
+    pullRequestNumber: number
+  ): Promise<PullRequestStatusResult> {
+    const octokit = await this.createInstallationClient();
+    const [owner, repo] = this.splitRepo(repoFullName);
+    const result = await octokit.request("GET /repos/{owner}/{repo}/pulls/{pull_number}", {
+      owner,
+      repo,
+      pull_number: pullRequestNumber
+    });
+
+    return {
+      number: result.data.number,
+      url: result.data.html_url,
+      state: result.data.merged ? "merged" : result.data.state,
+      mergeable: result.data.mergeable,
+      title: result.data.title
+    };
+  }
+
+  async closePullRequest(repoFullName: string, pullRequestNumber: number): Promise<void> {
+    const octokit = await this.createInstallationClient();
+    const [owner, repo] = this.splitRepo(repoFullName);
+
+    await octokit.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", {
+      owner,
+      repo,
+      pull_number: pullRequestNumber,
+      state: "closed"
+    });
+  }
+
+  async deleteBranch(repoFullName: string, branchName: string): Promise<void> {
+    const octokit = await this.createInstallationClient();
+    const [owner, repo] = this.splitRepo(repoFullName);
+
+    await octokit.request("DELETE /repos/{owner}/{repo}/git/refs/{ref}", {
+      owner,
+      repo,
+      ref: `heads/${branchName}`
+    });
+  }
+
   private async createInstallationClient() {
     if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY || !env.GITHUB_APP_INSTALLATION_ID) {
       throw new Error("GitHub App environment variables are not configured");
@@ -78,5 +136,15 @@ export class GitHubAppClient implements PullRequestClient {
     });
 
     return app.getInstallationOctokit(Number(env.GITHUB_APP_INSTALLATION_ID));
+  }
+
+  private splitRepo(repoFullName: string) {
+    const [owner, repo] = repoFullName.split("/");
+
+    if (!owner || !repo) {
+      throw new Error("repoFullName must use owner/repo format");
+    }
+
+    return [owner, repo] as const;
   }
 }

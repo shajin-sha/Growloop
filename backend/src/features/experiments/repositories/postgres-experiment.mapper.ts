@@ -18,6 +18,7 @@ type VariantRow = {
   weight: number;
   status: ExperimentVariant["status"];
   branch_name: string | null;
+  pull_request_number: number | null;
   pull_request_url: string | null;
   created_at: Date;
 };
@@ -44,6 +45,7 @@ export function mapVariant(row: VariantRow): ExperimentVariant {
     weight: row.weight,
     status: row.status,
     branchName: row.branch_name,
+    pullRequestNumber: row.pull_request_number,
     pullRequestUrl: row.pull_request_url,
     createdAt: row.created_at.toISOString()
   };

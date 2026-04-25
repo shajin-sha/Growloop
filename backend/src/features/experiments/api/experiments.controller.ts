@@ -109,6 +109,22 @@ export function createExperimentsRouter(service: ExperimentService) {
     }
   });
 
+  router.get("/experiments/:id/pull-requests", async (request, response, next) => {
+    try {
+      response.json({ pullRequests: await service.getPullRequestStatuses(request.params.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/experiments/:id/pull-requests/close-losers", async (request, response, next) => {
+    try {
+      response.json({ experiment: await service.closeLosingPullRequests(request.params.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/sdk/experiments/:id", async (request, response, next) => {
     try {
       const experiment = await service.getSdkConfig(request.params.id);

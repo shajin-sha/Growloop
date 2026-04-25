@@ -169,13 +169,14 @@ export class PostgresExperimentRepository implements ExperimentRepository {
   async attachPullRequest(
     variantId: string,
     branchName: string,
+    pullRequestNumber: number,
     pullRequestUrl: string
   ): Promise<void> {
     await this.db.query(
       `update experiment_variants
-       set branch_name = $2, pull_request_url = $3
+       set branch_name = $2, pull_request_number = $3, pull_request_url = $4
        where id = $1`,
-      [variantId, branchName, pullRequestUrl]
+      [variantId, branchName, pullRequestNumber, pullRequestUrl]
     );
   }
 }

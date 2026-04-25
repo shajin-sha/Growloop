@@ -33,7 +33,19 @@ Required permissions for the first PR workflow:
 
 - Contents: read/write
 - Pull requests: read/write
+- Commit statuses: read
+- Checks: read
 - Metadata: read
+
+Growloop uses the GitHub App to:
+
+- read repository contents through an installation token
+- open pull requests for generated variants
+- read pull request state for variants
+- merge the winning pull request
+- close losing pull requests and delete their unmerged variant branches
+
+E2B/Codex is still the right place to create the actual branch diff. The GitHub App owns repo access and PR lifecycle.
 
 Set these on the backend:
 
@@ -54,6 +66,8 @@ The included GitHub Action deploys the backend over SSH. Add repository secrets:
 - `VPS_APP_PATH`
 
 The backend expects Postgres and a persistent `backend/.env` on the VPS.
+
+The deployed process is `growloop-backend` in pm2. Backend deploys are handled by `.github/workflows/deploy-backend.yml`.
 
 ## SDK
 

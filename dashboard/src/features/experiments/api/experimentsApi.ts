@@ -4,7 +4,9 @@ import { dashboardLogger } from "@/lib/logger";
 
 import type { CreateExperimentFormValues, ExperimentAction } from "../types/experiment.types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4100";
+const API_URL =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.PROD ? "https://hackathon.shajinkp.com" : "http://localhost:4100");
 
 type ExperimentResponse = {
   experiment: ExperimentSummary;

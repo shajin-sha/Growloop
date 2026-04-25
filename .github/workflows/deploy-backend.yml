@@ -1,4 +1,4 @@
-name: Deploy backend
+name: Deploy Backend to VPS
 
 on:
   push:
@@ -6,26 +6,149 @@ on:
       - main
     paths:
       - "backend/**"
+      - "sdk/**"
       - "shared/**"
       - "package.json"
       - "package-lock.json"
+      - "tsconfig.base.json"
       - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
 
 jobs:
   deploy:
+    name: Deploy to VPS
     runs-on: ubuntu-latest
+
     steps:
-      - name: Deploy over SSH
+      - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          command_timeout: 20m
+          script_stop: false
           script: |
+            export PATH="/opt/bitnami/node/bin:/opt/bitnami/common/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+            export HOME="/home/bitnami"
+
+            trap 'echo "FAILED at line $LINENO (exit code $?)" >&2' ERR
             set -euo pipefail
-            cd "${{ secrets.VPS_APP_PATH }}"
-            git pull --ff-only
-            npm ci
-            npm run build
+
+            echo "Starting Growloop backend deployment..."
+
+            DEPLOY_DIR="/home/bitnami/growloop"
+            BACKUP_DIR="/home/bitnami/growloop-backups"
+            APP_NAME="growloop-backend"
+            APP_PORT="4100"
+            APP_ENV="production"
+            BACKUP_TS="$(date +%Y%m%d_%H%M%S)"
+            SDK_PUBLIC_DIR="/var/www/hackathon.shajinkp.com/sdk"
+
+            cd "$DEPLOY_DIR"
+
+            echo "Backing up current backend build and SDK..."
+            mkdir -p "$BACKUP_DIR"
+            if [ -d "backend/dist" ]; then
+              cp -r backend/dist "$BACKUP_DIR/backend_dist_$BACKUP_TS" || true
+            fi
+            if [ -d "$SDK_PUBLIC_DIR" ]; then
+              cp -r "$SDK_PUBLIC_DIR" "$BACKUP_DIR/sdk_$BACKUP_TS" || true
+            fi
+            cd "$BACKUP_DIR"
+            ls -dt backend_dist_* 2>/dev/null | tail -n +4 | xargs rm -rf 2>/dev/null || true
+            ls -dt sdk_* 2>/dev/null | tail -n +4 | xargs rm -rf 2>/dev/null || true
+            cd "$DEPLOY_DIR"
+
+            echo "Pulling latest changes..."
+            GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_rsa -o StrictHostKeyChecking=no" git fetch origin
+            git reset --hard origin/main
+            echo "Now at: $(git log --oneline -1)"
+
+            LOCK_HASH_FILE="$BACKUP_DIR/package_lock.sha256"
+            CURRENT_LOCK_HASH="$(sha256sum package-lock.json | cut -d' ' -f1)"
+            PREVIOUS_LOCK_HASH=""
+            [ -f "$LOCK_HASH_FILE" ] && PREVIOUS_LOCK_HASH="$(cat "$LOCK_HASH_FILE")"
+
+            if [ ! -d "node_modules" ] || [ "$CURRENT_LOCK_HASH" != "$PREVIOUS_LOCK_HASH" ]; then
+              echo "Installing dependencies..."
+              if npm ci --include=dev --no-audit; then
+                echo "npm ci succeeded"
+              else
+                echo "npm ci failed, falling back to npm install..."
+                npm install --include=dev --no-audit
+              fi
+              echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
+            else
+              echo "Dependencies unchanged, skipping install."
+            fi
+
+            echo "Building backend..."
+            npm run build --workspace @growloop/backend
+            if [ ! -f "backend/dist/src/server.js" ]; then
+              echo "Build output missing: backend/dist/src/server.js"
+              exit 1
+            fi
+
+            echo "Building SDK..."
+            npm run build --workspace @growloop/sdk
+            if [ ! -f "sdk/dist/index.global.js" ]; then
+              echo "SDK output missing: sdk/dist/index.global.js"
+              exit 1
+            fi
+
+            echo "Running database migrations..."
             npm run migrate
-            pm2 restart growloop-backend || pm2 start backend/dist/src/server.js --name growloop-backend
+
+            echo "Publishing SDK files..."
+            sudo rm -rf "$SDK_PUBLIC_DIR"
+            sudo mkdir -p "$SDK_PUBLIC_DIR"
+            sudo cp -R sdk/dist/. "$SDK_PUBLIC_DIR/"
+            sudo chown -R bitnami:daemon "$SDK_PUBLIC_DIR"
+            sudo chmod -R g+rx "$SDK_PUBLIC_DIR"
+
+            echo "Reloading backend..."
+            cd "$DEPLOY_DIR/backend"
+            if pm2 describe "$APP_NAME" > /dev/null 2>&1; then
+              PORT="$APP_PORT" NODE_ENV="$APP_ENV" pm2 reload "$APP_NAME" --update-env
+            else
+              PORT="$APP_PORT" NODE_ENV="$APP_ENV" pm2 start dist/src/server.js --name "$APP_NAME"
+            fi
+            cd "$DEPLOY_DIR"
+
+            sleep 5
+
+            echo "Health checking..."
+            HEALTH_URL="http://127.0.0.1:${APP_PORT}/health"
+            HEALTH_OK=false
+            for i in $(seq 1 10); do
+              HTTP_CODE="$(curl -sS --connect-timeout 3 --max-time 5 -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || echo '000')"
+              if [ "$HTTP_CODE" = "200" ]; then
+                HEALTH_OK=true
+                echo "Health check passed on attempt $i"
+                break
+              fi
+              echo "Attempt $i: HTTP $HTTP_CODE"
+              sleep 3
+            done
+
+            if [ "$HEALTH_OK" = false ]; then
+              echo "Health check failed. Rolling back backend build..."
+              pm2 logs "$APP_NAME" --lines 80 --nostream 2>&1 || true
+              rm -rf backend/dist
+              LAST_BACKUP="$(ls -dt "$BACKUP_DIR"/backend_dist_* 2>/dev/null | head -1 || true)"
+              if [ -n "$LAST_BACKUP" ]; then
+                cp -r "$LAST_BACKUP" backend/dist
+                cd "$DEPLOY_DIR/backend"
+                PORT="$APP_PORT" NODE_ENV="$APP_ENV" pm2 reload "$APP_NAME" --update-env || true
+              else
+                echo "No backend build backup found for rollback."
+              fi
+              exit 1
+            fi
+
+            sudo nginx -t
+            sudo systemctl reload nginx
+            pm2 save
+            echo "Growloop backend deployment completed."

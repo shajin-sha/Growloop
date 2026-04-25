@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npm run build --workspace @growloop/dashboard",
+  "installCommand": "npm ci",
+  "outputDirectory": "dashboard/dist",
+  "framework": "vite"
+}

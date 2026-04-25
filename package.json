@@ -1,0 +1,26 @@
+{
+  "name": "growloop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Autonomous conversion experiments shipped through GitHub pull requests.",
+  "workspaces": [
+    "backend",
+    "dashboard",
+    "sdk",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:dashboard\"",
+    "dev:backend": "npm run dev --workspace @growloop/backend",
+    "dev:dashboard": "npm run dev --workspace @growloop/dashboard",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "migrate": "npm run migrate --workspace @growloop/backend"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

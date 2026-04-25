@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "types": ["node"],
+    "paths": {
+      "@growloop/shared": ["../shared/src/index.ts"]
+    }
+  },
+  "include": ["src", "scripts"]
+}

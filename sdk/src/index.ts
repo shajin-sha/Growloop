@@ -27,7 +27,7 @@ class GrowloopClient {
   private experimentId: string | null = null;
   private variantId: string | null = null;
 
-  constructor(private readonly options: GrowloopOptions) {}
+  constructor(private readonly options: GrowloopOptions) { }
 
   async init() {
     if (this.options.goalId) {

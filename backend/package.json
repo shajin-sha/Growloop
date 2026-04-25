@@ -11,6 +11,7 @@
     "migrate": "tsx scripts/migrate.ts",
     "smoke:e2b": "tsx scripts/e2b-smoke.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
+    "smoke:sdk": "tsx scripts/smoke-sdk.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

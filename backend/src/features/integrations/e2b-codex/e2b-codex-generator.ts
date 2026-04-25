@@ -34,9 +34,29 @@ export type PlanGoalExperimentsInput = {
   repoFullName: string;
 };
 
+export type GenerateGoalInput = {
+  goalId: string;
+  repoFullName: string;
+  goal: string;
+  allowList: string[];
+  experiments: Array<{
+    experimentId: string;
+    name: string;
+    description: string | null;
+    conversionEvent: string;
+  }>;
+};
+
+export type GenerateGoalResult = {
+  branchName: string;
+  pullRequestTitle: string;
+  pullRequestBody: string;
+};
+
 export interface VariantGenerator {
   planGoalExperiments(input: PlanGoalExperimentsInput): Promise<GeneratedExperimentPlan[]>;
   generate(input: GenerateVariantsInput): Promise<GeneratedVariant[]>;
+  generateForGoal(input: GenerateGoalInput): Promise<GenerateGoalResult>;
 }
 
 const REPO_PATH = "/home/user/repo";
@@ -174,6 +194,135 @@ export class E2BCodexVariantGenerator implements VariantGenerator {
         name: String(item.name || "Experiment"),
         description: String(item.description || "Codex-generated experiment plan.")
       }));
+    } finally {
+      await sandbox.kill().catch(() => { });
+    }
+  }
+
+  async generateForGoal(input: GenerateGoalInput): Promise<GenerateGoalResult> {
+    if (!env.E2B_API_KEY) throw new Error("E2B_API_KEY is required");
+    if (!getCodexApiKey()) throw new Error("OPENAI_API_KEY or CODEX_API_KEY is required");
+
+    const token = await this.github.createInstallationToken();
+    const suffix = randomUUID().slice(0, 8);
+    const branchName = `growloop/goal-${input.goalId.slice(0, 8)}/${suffix}`;
+
+    const sandbox = await Sandbox.create(env.E2B_TEMPLATE, {
+      apiKey: env.E2B_API_KEY,
+      timeoutMs: env.E2B_SANDBOX_TIMEOUT_MS,
+      envs: { ...getCodexEnvironment() }
+    });
+
+    logger.info("Created E2B sandbox for goal", {
+      module: "e2b-codex",
+      goalId: input.goalId,
+      repoFullName: input.repoFullName,
+      branchName,
+      sandboxId: sandbox.sandboxId
+    });
+
+    try {
+      await sandbox.git.clone(`https://github.com/${input.repoFullName}.git`, {
+        path: REPO_PATH,
+        branch: "main",
+        depth: 1,
+        username: GITHUB_USERNAME,
+        password: token,
+        timeoutMs: 120_000
+      });
+
+      await sandbox.git.createBranch(REPO_PATH, branchName);
+
+      // Run Codex for each experiment sequentially on the same branch
+      for (const experiment of input.experiments) {
+        const prompt = [
+          "SYSTEM PROMPT FOR CODEX AGENT",
+          CODEX_EXPERIMENT_SYSTEM_PROMPT,
+          "",
+          "EXPERIMENT CONTEXT",
+          `Goal: ${input.goal}`,
+          `Goal ID: ${input.goalId}`,
+          `Experiment ID: ${experiment.experimentId}`,
+          `Experiment name: ${experiment.name}`,
+          `Experiment description: ${experiment.description ?? "none"}`,
+          `Conversion event: ${experiment.conversionEvent}`,
+          `Allowed paths: ${input.allowList.join(", ") || "none provided"}`,
+          "",
+          "TASK",
+          "Implement this single experiment now. Make the smallest useful code change that can plausibly improve the goal.",
+          "IMPORTANT: Do NOT undo or overwrite changes from previous experiments. Build on top of what already exists in the working directory."
+        ].join("\n");
+
+        try {
+          await sandbox.commands.run(
+            `${env.CODEX_COMMAND} exec --full-auto --skip-git-repo-check -C ${REPO_PATH} ${shellQuote(prompt)}`,
+            { envs: getCodexEnvironment(), timeoutMs: 300_000 }
+          );
+
+          // Commit after each experiment so changes are preserved
+          await sandbox.git.add(REPO_PATH, { all: true });
+          await sandbox.git.commit(REPO_PATH, `experiment: ${experiment.name}`, {
+            authorName: "growloopbot[bot]",
+            authorEmail: "growloopbot[bot]@users.noreply.github.com"
+          });
+
+          logger.info("Codex completed experiment", {
+            module: "e2b-codex",
+            goalId: input.goalId,
+            experimentId: experiment.experimentId,
+            experimentName: experiment.name
+          });
+        } catch (error) {
+          logger.error("Codex failed for experiment, continuing with others", {
+            module: "e2b-codex",
+            goalId: input.goalId,
+            experimentId: experiment.experimentId,
+            experimentName: experiment.name,
+            error: getErrorMessage(error),
+            stdout: getCommandOutput(error, "stdout"),
+            stderr: getCommandOutput(error, "stderr")
+          });
+          // Continue with next experiment even if one fails
+        }
+      }
+
+      await sandbox.git.configureUser("growloopbot[bot]", "growloopbot[bot]@users.noreply.github.com", {
+        scope: "local",
+        path: REPO_PATH
+      });
+
+      await sandbox.git.push(REPO_PATH, {
+        remote: "origin",
+        branch: branchName,
+        username: GITHUB_USERNAME,
+        password: token,
+        timeoutMs: 120_000
+      });
+
+      logger.info("Pushed goal branch", {
+        module: "e2b-codex",
+        goalId: input.goalId,
+        branchName
+      });
+
+      const experimentList = input.experiments.map((e) => `- **${e.name}**: ${e.description ?? "Codex-generated"}`).join("\n");
+
+      return {
+        branchName,
+        pullRequestTitle: `[Growloop] ${input.goal}`,
+        pullRequestBody: [
+          "Generated by Growloop.",
+          "",
+          `**Goal:** ${input.goal}`,
+          "",
+          `**Experiments (${input.experiments.length}):**`,
+          experimentList,
+          "",
+          `Allowed paths: ${input.allowList.join(", ") || "not configured"}`,
+          "",
+          "Each experiment was implemented by Codex in an E2B sandbox."
+        ].join("\n")
+      };
     } finally {
       await sandbox.kill().catch(() => { });
     }

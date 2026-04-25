@@ -93,31 +93,63 @@ export class ExperimentService {
   }
 
   private async generateAllExperimentPRs(goal: GoalSummary): Promise<void> {
-    for (const experiment of goal.experiments) {
-      try {
-        updateGenerationStatus(goal.id, experiment.id, "cloning", "Cloning repo into sandbox");
-        await this.generatePullRequests(
-          experiment.id,
-          goal.title,
-          ["src", "app", "components", "pages"]
-        );
-        updateGenerationStatus(goal.id, experiment.id, "done", "PR opened");
-        logger.info("Generated PRs for experiment", {
-          module: "experiment-service",
-          goalId: goal.id,
-          experimentId: experiment.id,
-          experimentName: experiment.name
-        });
-      } catch (error) {
-        updateGenerationStatus(goal.id, experiment.id, "failed", error instanceof Error ? error.message : "Unknown error");
-        logger.error("Failed to generate PRs for experiment", {
-          module: "experiment-service",
-          goalId: goal.id,
-          experimentId: experiment.id,
-          experimentName: experiment.name,
-          error: error instanceof Error ? error.message : "unknown error"
-        });
+    try {
+      // Update status for all experiments
+      for (const experiment of goal.experiments) {
+        updateGenerationStatus(goal.id, experiment.id, "generating", "Codex is working...");
       }
+
+      // Single sandbox, single branch, all experiments
+      const result = await this.generator.generateForGoal({
+        goalId: goal.id,
+        repoFullName: goal.repoFullName,
+        goal: goal.title,
+        allowList: ["src", "app", "components", "pages"],
+        experiments: goal.experiments.map((e) => ({
+          experimentId: e.id,
+          name: e.name,
+          description: e.description,
+          conversionEvent: e.conversionEvent
+        }))
+      });
+
+      // One PR for the whole goal
+      const pullRequest = await this.pullRequests.createPullRequest({
+        repoFullName: goal.repoFullName,
+        title: result.pullRequestTitle,
+        body: result.pullRequestBody,
+        headBranch: result.branchName,
+        baseBranch: "main"
+      });
+
+      // Attach the same PR to all experiment variants
+      for (const experiment of goal.experiments) {
+        for (const variant of experiment.variants) {
+          await this.repository.attachPullRequest(
+            variant.id,
+            result.branchName,
+            pullRequest.number,
+            pullRequest.url
+          );
+        }
+        updateGenerationStatus(goal.id, experiment.id, "done", "PR opened");
+      }
+
+      logger.info("Generated single PR for goal", {
+        module: "experiment-service",
+        goalId: goal.id,
+        prNumber: pullRequest.number,
+        prUrl: pullRequest.url
+      });
+    } catch (error) {
+      for (const experiment of goal.experiments) {
+        updateGenerationStatus(goal.id, experiment.id, "failed", error instanceof Error ? error.message : "Unknown error");
+      }
+      logger.error("Failed to generate PR for goal", {
+        module: "experiment-service",
+        goalId: goal.id,
+        error: error instanceof Error ? error.message : "unknown error"
+      });
     }
   }
 

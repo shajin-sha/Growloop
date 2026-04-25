@@ -26,7 +26,7 @@ export function createApp() {
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/health", (_request, response) => {
-    response.json({ ok: true });
+    response.json({ ok: true, service: "growloop-backend" });
   });
 
   app.use("/api", createExperimentsRouter(service));

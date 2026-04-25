@@ -44,6 +44,10 @@ export interface PullRequestClient {
   deleteBranch(repoFullName: string, branchName: string): Promise<void>;
 }
 
+export interface GitHubInstallationTokenProvider {
+  createInstallationToken(): Promise<string>;
+}
+
 export class GitHubAppClient implements PullRequestClient {
   constructor(private readonly installations: GitHubInstallationRepository) {}
 
@@ -137,16 +141,55 @@ export class GitHubAppClient implements PullRequestClient {
   }
 
   async getInstallationDetails(installationId: number): Promise<GitHubInstallationDetails> {
+    const details = await this.findInstallationDetails(installationId);
+
+    if (!details) {
+      throw new Error("GitHub App installation was not found");
+    }
+
+    return details;
+  }
+
+  async createInstallationToken(): Promise<string> {
+    const installation = await this.installations.findLatest();
+
+    if (!installation) {
+      throw new Error("GitHub App is not installed");
+    }
+
     const app = await this.createApp();
-    const result = await app.octokit.request("GET /app/installations/{installation_id}", {
-      installation_id: installationId
+    const auth = await app.octokit.auth({
+      type: "installation",
+      installationId: installation.installationId
     });
 
-    return {
-      installationId: result.data.id,
-      accountLogin: getAccountLogin(result.data.account),
-      targetType: result.data.target_type
-    };
+    if (!isInstallationTokenAuth(auth)) {
+      throw new Error("GitHub installation token response was invalid");
+    }
+
+    return auth.token;
+  }
+
+  async findInstallationDetails(installationId: number): Promise<GitHubInstallationDetails | null> {
+    const app = await this.createApp();
+
+    try {
+      const result = await app.octokit.request("GET /app/installations/{installation_id}", {
+        installation_id: installationId
+      });
+
+      return {
+        installationId: result.data.id,
+        accountLogin: getAccountLogin(result.data.account),
+        targetType: result.data.target_type
+      };
+    } catch (error) {
+      if (getErrorStatus(error) === 404) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   private async createInstallationClient() {
@@ -198,6 +241,24 @@ export class GitHubAppClient implements PullRequestClient {
   }
 }
 
+function isInstallationTokenAuth(auth: unknown): auth is { token: string } {
+  if (typeof auth !== "object" || auth === null || !("token" in auth)) {
+    return false;
+  }
+
+  const token = (auth as { token?: unknown }).token;
+  return typeof token === "string" && token.length > 0;
+}
+
 function getAccountLogin(account: { login?: string; slug?: string } | null | undefined) {
   return account?.login ?? account?.slug ?? "unknown";
+}
+
+function getErrorStatus(error: unknown) {
+  if (typeof error !== "object" || error === null || !("status" in error)) {
+    return null;
+  }
+
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : null;
 }

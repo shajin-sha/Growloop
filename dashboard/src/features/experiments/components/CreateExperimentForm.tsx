@@ -32,32 +32,43 @@ export function CreateExperimentForm({ onCreate }: CreateExperimentFormProps) {
   }
 
   return (
-    <form className="grid gap-3 border-b border-border p-5 md:grid-cols-[1fr_1fr_180px_auto]" onSubmit={submit}>
-      <input
-        className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
-        onChange={(event) => setValues({ ...values, name: event.target.value })}
-        placeholder="Experiment name"
-        required
-        value={values.name}
-      />
-      <input
-        className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
-        onChange={(event) => setValues({ ...values, repoFullName: event.target.value })}
-        placeholder="owner/repo"
-        required
-        value={values.repoFullName}
-      />
-      <input
-        className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
-        onChange={(event) => setValues({ ...values, conversionEvent: event.target.value })}
-        placeholder="signup"
-        required
-        value={values.conversionEvent}
-      />
-      <Button disabled={isSubmitting} type="submit">
-        <Plus size={16} />
-        Create
-      </Button>
+    <form className="grid gap-4 border-b border-border bg-background p-5 lg:grid-cols-[1fr_1fr_180px_auto]" onSubmit={submit}>
+      <label className="grid gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">Experiment</span>
+        <input
+          className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-primary"
+          onChange={(event) => setValues({ ...values, name: event.target.value })}
+          placeholder="Homepage CTA"
+          required
+          value={values.name}
+        />
+      </label>
+      <label className="grid gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">Repository</span>
+        <input
+          className="h-10 rounded-md border border-input bg-background px-3 font-mono text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-primary"
+          onChange={(event) => setValues({ ...values, repoFullName: event.target.value })}
+          placeholder="owner/repo"
+          required
+          value={values.repoFullName}
+        />
+      </label>
+      <label className="grid gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">Event</span>
+        <input
+          className="h-10 rounded-md border border-input bg-background px-3 font-mono text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-primary"
+          onChange={(event) => setValues({ ...values, conversionEvent: event.target.value })}
+          placeholder="signup"
+          required
+          value={values.conversionEvent}
+        />
+      </label>
+      <div className="flex items-end">
+        <Button className="h-10 w-full lg:w-auto" disabled={isSubmitting} type="submit">
+          <Plus size={16} />
+          Create
+        </Button>
+      </div>
     </form>
   );
 }

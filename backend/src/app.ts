@@ -20,7 +20,7 @@ export function createApp() {
   const githubInstallations = new PostgresGitHubInstallationRepository(pool);
   const winnerDetection = new WinnerDetectionService();
   const github = new GitHubAppClient(githubInstallations);
-  const generator = new E2BCodexVariantGenerator();
+  const generator = new E2BCodexVariantGenerator(github);
   const service = new ExperimentService(repository, winnerDetection, github, generator);
 
   app.use(helmet());

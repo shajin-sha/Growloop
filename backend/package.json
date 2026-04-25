@@ -9,6 +9,7 @@
     "build": "tsup src/server.ts scripts/migrate.ts --format esm",
     "start": "node dist/server.js",
     "migrate": "tsx scripts/migrate.ts",
+    "smoke:e2b": "tsx scripts/e2b-smoke.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,6 +18,7 @@
     "@octokit/rest": "^21.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "e2b": "^2.19.1",
     "express": "^4.21.1",
     "helmet": "^8.0.0",
     "joi": "^17.13.3",

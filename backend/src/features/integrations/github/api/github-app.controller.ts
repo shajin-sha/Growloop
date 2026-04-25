@@ -19,18 +19,35 @@ export function createGitHubAppRouter(
 
   router.get("/github/app", async (_request, response, next) => {
     try {
-      const installation = await installations.findLatest();
+      let installation = await installations.findLatest();
+      let installationVerified = false;
       const installUrl = env.GITHUB_APP_SLUG
         ? `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new`
         : null;
+      const hasCredentials = Boolean(
+        env.GITHUB_APP_ID && (env.GITHUB_APP_PRIVATE_KEY || env.GITHUB_APP_PRIVATE_KEY_PATH)
+      );
+
+      if (installation && hasCredentials) {
+        const liveInstallation = await github.findInstallationDetails(installation.installationId);
+
+        if (liveInstallation) {
+          installationVerified = true;
+        } else {
+          logger.info("Removing stale GitHub App installation", {
+            module: "github",
+            installationId: installation.installationId,
+            accountLogin: installation.accountLogin
+          });
+
+          await installations.deleteById(installation.installationId);
+          installation = null;
+        }
+      }
 
       response.json({
         app: {
-          configured: Boolean(
-            env.GITHUB_APP_ID &&
-              installation &&
-              (env.GITHUB_APP_PRIVATE_KEY || env.GITHUB_APP_PRIVATE_KEY_PATH)
-          ),
+          configured: hasCredentials && installationVerified,
           installUrl,
           installation,
           slug: env.GITHUB_APP_SLUG ?? null
@@ -74,14 +91,51 @@ export function createGitHubAppRouter(
     }
   });
 
-  router.post("/github/webhook", (request, response) => {
-    logger.info("GitHub App webhook received", {
-      module: "github",
-      event: request.header("x-github-event") ?? "unknown"
-    });
+  router.post("/github/webhook", async (request, response, next) => {
+    try {
+      const event = request.header("x-github-event") ?? "unknown";
+      const installationId = readInstallationId(request.body);
 
-    response.status(202).json({ ok: true });
+      logger.info("GitHub App webhook received", {
+        module: "github",
+        event,
+        action: readAction(request.body),
+        installationId
+      });
+
+      if (event === "installation" && readAction(request.body) === "deleted" && installationId) {
+        await installations.deleteById(installationId);
+      }
+
+      response.status(202).json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
   });
 
   return router;
+}
+
+function readAction(body: unknown) {
+  if (typeof body !== "object" || body === null || !("action" in body)) {
+    return null;
+  }
+
+  const action = (body as { action?: unknown }).action;
+  return typeof action === "string" ? action : null;
+}
+
+function readInstallationId(body: unknown) {
+  if (typeof body !== "object" || body === null || !("installation" in body)) {
+    return null;
+  }
+
+  const installation = (body as { installation?: unknown }).installation;
+
+  if (typeof installation !== "object" || installation === null || !("id" in installation)) {
+    return null;
+  }
+
+  const id = (installation as { id?: unknown }).id;
+  return typeof id === "number" ? id : null;
 }

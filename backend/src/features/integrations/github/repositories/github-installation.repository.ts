@@ -17,4 +17,5 @@ export type UpsertGitHubInstallationInput = {
 export interface GitHubInstallationRepository {
   findLatest(): Promise<GitHubInstallation | null>;
   upsert(input: UpsertGitHubInstallationInput): Promise<GitHubInstallation>;
+  deleteById(installationId: number): Promise<void>;
 }

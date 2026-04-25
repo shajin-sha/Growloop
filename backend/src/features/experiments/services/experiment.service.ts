@@ -82,11 +82,12 @@ export class ExperimentService {
       experimentId: id,
       repoFullName: experiment.repoFullName,
       goal,
-      allowList
+      allowList,
+      variantNames: experiment.variants.map((variant) => variant.name)
     });
 
-    for (const plan of generated.slice(0, experiment.variants.length)) {
-      const variant = experiment.variants[generated.indexOf(plan)];
+    for (const [index, plan] of generated.slice(0, experiment.variants.length).entries()) {
+      const variant = experiment.variants[index];
       const pullRequest = await this.pullRequests.createPullRequest({
         repoFullName: experiment.repoFullName,
         title: plan.pullRequestTitle,

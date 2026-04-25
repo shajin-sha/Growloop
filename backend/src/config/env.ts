@@ -21,6 +21,9 @@ const envSchema = z.object({
   GITHUB_APP_PRIVATE_KEY_PATH: z.string().optional(),
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
   E2B_API_KEY: z.string().optional(),
+  E2B_TEMPLATE: z.string().default("codex"),
+  E2B_SANDBOX_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+  OPENAI_API_KEY: z.string().optional(),
   CODEX_COMMAND: z.string().default("codex")
 });
 

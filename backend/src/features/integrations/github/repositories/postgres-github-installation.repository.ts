@@ -58,6 +58,14 @@ export class PostgresGitHubInstallationRepository implements GitHubInstallationR
 
     return mapInstallation(result.rows[0]);
   }
+
+  async deleteById(installationId: number): Promise<void> {
+    await this.db.query(
+      `delete from github_app_installations
+       where installation_id = $1`,
+      [installationId]
+    );
+  }
 }
 
 function mapInstallation(row: InstallationRow): GitHubInstallation {

@@ -6,6 +6,10 @@ const config: Config = {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-geist-sans)"],
+        mono: ["var(--font-geist-mono)"]
+      },
       colors: {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
@@ -21,9 +25,9 @@ const config: Config = {
         "destructive-foreground": "hsl(var(--destructive-foreground))"
       },
       borderRadius: {
-        lg: "8px",
-        md: "6px",
-        sm: "4px"
+        lg: "18px",
+        md: "14px",
+        sm: "10px"
       }
     }
   },

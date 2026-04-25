@@ -16,6 +16,7 @@ const envSchema = z.object({
   DATABASE_SSL_REJECT_UNAUTHORIZED: booleanEnv.default("true"),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   GITHUB_APP_ID: z.string().optional(),
+  GITHUB_APP_SLUG: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
   GITHUB_APP_INSTALLATION_ID: z.string().optional(),
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),

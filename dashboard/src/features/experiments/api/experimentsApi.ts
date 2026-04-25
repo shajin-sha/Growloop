@@ -16,6 +16,16 @@ type ExperimentsResponse = {
   experiments: ExperimentSummary[];
 };
 
+export type GitHubAppInfo = {
+  configured: boolean;
+  installUrl: string | null;
+  slug: string | null;
+};
+
+type GitHubAppResponse = {
+  app: GitHubAppInfo;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -39,6 +49,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listExperiments() {
   const body = await request<ExperimentsResponse>("/api/experiments");
   return body.experiments;
+}
+
+export async function getGitHubAppInfo() {
+  const body = await request<GitHubAppResponse>("/api/github/app");
+  return body.app;
 }
 
 export async function createExperiment(values: CreateExperimentFormValues) {

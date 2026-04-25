@@ -1,9 +1,24 @@
 import { Router } from "express";
 
+import { env } from "../../../../config/env";
 import { logger } from "../../../../logger";
 
 export function createGitHubAppRouter() {
   const router = Router();
+
+  router.get("/github/app", (_request, response) => {
+    const installUrl = env.GITHUB_APP_SLUG
+      ? `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new`
+      : null;
+
+    response.json({
+      app: {
+        configured: Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_INSTALLATION_ID),
+        installUrl,
+        slug: env.GITHUB_APP_SLUG ?? null
+      }
+    });
+  });
 
   router.get("/github/callback", (request, response) => {
     logger.info("GitHub App callback received", {

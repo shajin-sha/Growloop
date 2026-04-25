@@ -1,10 +1,11 @@
-import { RefreshCcw } from "lucide-react";
+import { Github, RefreshCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
 import { CreateExperimentForm } from "./CreateExperimentForm";
 import { ExperimentRow } from "./ExperimentRow";
 import { useExperiments } from "../hooks/useExperiments";
+import { useGitHubApp } from "../hooks/useGitHubApp";
 
 export function ExperimentsPage() {
   const {
@@ -17,6 +18,7 @@ export function ExperimentsPage() {
     refresh,
     updateStatus
   } = useExperiments();
+  const githubApp = useGitHubApp();
 
   return (
     <main className="min-h-screen">
@@ -28,10 +30,20 @@ export function ExperimentsPage() {
               Conversion experiments, GitHub PRs, and winner calls.
             </p>
           </div>
-          <Button onClick={refresh} variant="outline">
-            <RefreshCcw size={16} />
-            Refresh
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {githubApp?.installUrl ? (
+              <Button asChild variant={githubApp.configured ? "outline" : "secondary"}>
+                <a href={githubApp.installUrl} rel="noreferrer" target="_blank">
+                  <Github size={16} />
+                  {githubApp.configured ? "GitHub App" : "Install GitHub App"}
+                </a>
+              </Button>
+            ) : null}
+            <Button onClick={refresh} variant="outline">
+              <RefreshCcw size={16} />
+              Refresh
+            </Button>
+          </div>
         </div>
       </header>
 
